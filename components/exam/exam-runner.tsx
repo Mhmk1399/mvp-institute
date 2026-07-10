@@ -31,9 +31,10 @@ export function ExamRunner({
 
   // One submission key per displayed turn, preserved across retries of that turn.
   const submissionKey = useRef("");
+  const turnId = turn?.id;
   useEffect(() => {
-    if (turn) submissionKey.current = crypto.randomUUID();
-  }, [turn?.id]);
+    if (turnId) submissionKey.current = crypto.randomUUID();
+  }, [turnId]);
 
   function applyResult(result: ExamActionResult) {
     if (result.status === "completed") {
@@ -81,23 +82,23 @@ export function ExamRunner({
 
   if (!turn) {
     return (
-      <div className="space-y-5">
-        <p className="text-sm text-foreground/70">
-          This short placement exam asks you a series of open questions and adapts
-          to your answers. It takes 8–12 questions to estimate your CEFR level.
-          Answer in full sentences; there is no time limit.
+    <div className="mx-auto w-full max-w-2xl space-y-5">
+      <p className="text-sm leading-6 text-[#91A4B7]">
+        This short placement exam asks you a series of open questions and adapts
+        to your answers. It takes 8–12 questions to estimate your CEFR level.
+        Answer in full sentences; there is no time limit.
+      </p>
+      {error ? (
+        <p className="rounded-2xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          {error}
         </p>
-        {error ? (
-          <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
-            {error}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          onClick={handleStart}
-          disabled={pending}
-          className="rounded-lg bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-60"
-        >
+      ) : null}
+      <button
+        type="button"
+        onClick={handleStart}
+        disabled={pending}
+        className="rounded-2xl bg-[#57D7FF] px-5 py-2.5 text-sm font-semibold text-[#07111F] transition-opacity hover:opacity-90 disabled:opacity-60"
+      >
           {pending ? "Preparing…" : "Start placement exam"}
         </button>
       </div>
@@ -105,12 +106,12 @@ export function ExamRunner({
   }
 
   return (
-    <div className="space-y-5">
-      <p className="text-xs font-medium uppercase tracking-wide text-foreground/50">
+    <div className="mx-auto w-full max-w-2xl space-y-5">
+      <p className="text-xs font-medium uppercase tracking-[0.18em] text-[#91A4B7]">
         {answered} / {TOTAL_TURNS} answered
       </p>
 
-      <p className="text-lg leading-relaxed">{turn.question}</p>
+      <p className="rounded-3xl border border-white/10 bg-white/[0.04] p-5 text-lg leading-relaxed text-[#F3F8FF]">{turn.question}</p>
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <textarea
@@ -119,11 +120,11 @@ export function ExamRunner({
           rows={6}
           onChange={(e) => setAnswer(e.target.value)}
           placeholder="Write your answer here…"
-          className="w-full rounded-lg border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:border-foreground/60 focus:ring-2 focus:ring-foreground/10 disabled:opacity-60 dark:border-white/20"
+          className="w-full rounded-3xl border border-white/12 bg-[#07111F]/45 px-4 py-3 text-sm text-[#F3F8FF] outline-none focus:border-[#57D7FF]/70 focus:ring-2 focus:ring-[#57D7FF]/15 disabled:opacity-60"
         />
 
         {error ? (
-          <p className="rounded-lg bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+          <p className="rounded-2xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
             {error}
           </p>
         ) : null}
@@ -131,7 +132,7 @@ export function ExamRunner({
         <button
           type="submit"
           disabled={pending || !answer.trim()}
-          className="rounded-lg bg-foreground px-5 py-2.5 text-sm font-semibold text-background transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="rounded-2xl bg-[#57D7FF] px-5 py-2.5 text-sm font-semibold text-[#07111F] transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {pending ? "Checking…" : "Submit answer"}
         </button>

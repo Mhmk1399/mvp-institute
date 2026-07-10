@@ -22,16 +22,18 @@ const taughtItemSchema = z.object({
 });
 
 export const classTurnOutputSchema = z.object({
-  reply: z.string().min(1),
-  corrections: z.array(
-    z.object({
-      original: z.string(),
-      corrected: z.string(),
-      explanation: z.string(),
-    }),
-  ),
-  taught: z.array(taughtItemSchema),
-  elicited: z.array(z.string()),
+  reply: z.string().min(1).max(3000),
+  corrections: z
+    .array(
+      z.object({
+        original: z.string(),
+        corrected: z.string(),
+        explanation: z.string(),
+      }),
+    )
+    .max(5),
+  taught: z.array(taughtItemSchema).max(5),
+  elicited: z.array(z.string()).max(5),
 });
 export type ClassTurnOutput = z.infer<typeof classTurnOutputSchema>;
 
@@ -44,9 +46,13 @@ export function buildMessages(input: ClassTurnInput): AIMessage[] {
     {
       role: "system",
       content: [
-        "You are a supportive language teacher conducting a one-to-one class turn.",
-        "Reply naturally, correct only meaningful errors, and keep the student engaged.",
-        "Only list an item under `taught` when your reply itself contains evidence of teaching it.",
+        "You are a supportive one-to-one English teacher.",
+        "Match the student's CEFR level and stay on the selected subject.",
+        "Encourage the student to speak more than you do; keep replies concise.",
+        "Do not correct every small error — correct only meaningful errors.",
+        "Never shame the student. Ask at most one clear follow-up question per turn.",
+        "List an item under `taught` only when your reply contains evidence of teaching it.",
+        "Each correction's `original` must be grounded in the student's message.",
         "Respond with JSON only, matching the required schema.",
       ].join(" "),
     },

@@ -88,6 +88,7 @@ function toSessionDTO(doc: SessionLean): ExamSessionDTO {
 }
 
 function toTurnDTO(doc: TurnLean): ExamTurnDTO {
+  const score = doc.aiScore;
   return {
     id: String(doc._id),
     sessionId: String(doc.sessionId),
@@ -100,21 +101,22 @@ function toTurnDTO(doc: TurnLean): ExamTurnDTO {
     goalKey: doc.goalKey,
     question: doc.question,
     studentAnswer: doc.studentAnswer ?? undefined,
-    aiScore: doc.aiScore
-      ? {
-          criteria: {
-            accuracy: doc.aiScore.criteria.accuracy,
-            grammar: doc.aiScore.criteria.grammar,
-            vocabulary: doc.aiScore.criteria.vocabulary,
-            taskCompletion: doc.aiScore.criteria.taskCompletion,
-          },
-          overallScore: doc.aiScore.overallScore,
-          evidence: [...doc.aiScore.evidence],
-          strengths: [...doc.aiScore.strengths],
-          weaknesses: [...doc.aiScore.weaknesses],
-          confidence: doc.aiScore.confidence,
-        }
-      : undefined,
+    aiScore:
+      score && score.criteria
+        ? {
+            criteria: {
+              accuracy: score.criteria.accuracy,
+              grammar: score.criteria.grammar,
+              vocabulary: score.criteria.vocabulary,
+              taskCompletion: score.criteria.taskCompletion,
+            },
+            overallScore: score.overallScore,
+            evidence: [...score.evidence],
+            strengths: [...score.strengths],
+            weaknesses: [...score.weaknesses],
+            confidence: score.confidence,
+          }
+        : undefined,
     confidence: doc.confidence ?? undefined,
     needsTeacherReview: doc.needsTeacherReview,
     abilityBefore: doc.abilityBefore,
@@ -326,7 +328,7 @@ export async function advanceSession(input: {
 
   const recentProjectedLevels = scored
     .map((turn) => turn.projectedLevelAfter)
-    .filter((level): level is string => typeof level === "string");
+    .filter((level): level is CEFRCode => typeof level === "string");
   const coveredGoalKeys = Array.from(new Set(turns.map((turn) => turn.goalKey)));
 
   const doc = await ExamSession.findOneAndUpdate(

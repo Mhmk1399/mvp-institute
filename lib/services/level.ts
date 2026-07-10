@@ -38,9 +38,9 @@ function toDTO(doc: LevelDoc): LevelDTO {
     name: doc.name,
     description: doc.description,
     goals: {
-      grammar: [...doc.goals.grammar],
-      vocabulary: [...doc.goals.vocabulary],
-      functions: [...doc.goals.functions],
+      grammar: [...(doc.goals?.grammar ?? [])],
+      vocabulary: [...(doc.goals?.vocabulary ?? [])],
+      functions: [...(doc.goals?.functions ?? [])],
     },
     canDoStatements: [...doc.canDoStatements],
     passThreshold: doc.passThreshold,
@@ -61,7 +61,7 @@ export async function listLevels(): Promise<LevelDTO[]> {
 
 export async function getLevelByCode(code: string): Promise<LevelDTO | null> {
   await connectToDatabase();
-  const doc = await Level.findOne({ code }).lean<LevelDoc | null>();
+  const doc = await Level.findOne({ code: code as CEFRCode }).lean<LevelDoc | null>();
   return doc ? toDTO(doc) : null;
 }
 
@@ -97,7 +97,7 @@ export async function updateLevel(
 ): Promise<LevelDTO | null> {
   await connectToDatabase();
   const doc = await Level.findOneAndUpdate(
-    { code },
+    { code: code as CEFRCode },
     { $set: { ...input, updatedBy: new mongoose.Types.ObjectId(actorId) } },
     { new: true, runValidators: true },
   ).lean<LevelDoc | null>();

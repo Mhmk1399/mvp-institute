@@ -19,10 +19,10 @@ const learnedItemSchema = z.object({
 });
 
 export const sessionSummaryOutputSchema = z.object({
-  summary: z.string().min(1),
-  learnedItems: z.array(learnedItemSchema),
-  strengths: z.array(z.string()),
-  nextSteps: z.array(z.string()),
+  summary: z.string().min(1).max(3000),
+  learnedItems: z.array(learnedItemSchema).max(30),
+  strengths: z.array(z.string()).max(10),
+  nextSteps: z.array(z.string()).max(10),
 });
 export type SessionSummaryOutput = z.infer<typeof sessionSummaryOutputSchema>;
 

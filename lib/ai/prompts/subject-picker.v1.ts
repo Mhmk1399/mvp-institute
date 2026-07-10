@@ -14,9 +14,9 @@ export const subjectPickerOutputSchema = z.object({
   subjects: z
     .array(
       z.object({
-        title: z.string().min(1),
-        description: z.string().min(1),
-        targetedGoals: z.array(z.string()),
+        title: z.string().min(1).max(200),
+        description: z.string().min(1).max(1000),
+        targetedGoals: z.array(z.string().min(1)).min(1).max(6),
       }),
     )
     .length(4)
@@ -38,6 +38,8 @@ export function buildMessages(input: SubjectPickerInput): AIMessage[] {
       content: [
         "You propose class subjects for a language learner.",
         "Return exactly four distinct subjects suitable for the given CEFR level.",
+        "Every targetedGoals value must be copied verbatim from the provided",
+        "curriculum goals — never invent or rephrase a goal.",
         "Avoid repeating previously used subjects.",
         "Respond with JSON only, matching the required schema.",
       ].join(" "),
