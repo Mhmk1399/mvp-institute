@@ -23,6 +23,30 @@ export const clientRealtimeEventSchema = z.discriminatedUnion("type", [
     type: z.literal("heartbeat"),
     sentAt: z.number().int().nonnegative(),
   }).strict(),
+  z.object({
+    type: z.literal("voice.capture.started"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("voice.capture.stopped"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("voice.capture.cancelled"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("voice.transcript.completed"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("voice.turn.completed"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("voice.turn.failed"),
+    requestId: requestIdSchema,
+  }).strict(),
 ]);
 
 export const serverRealtimeEventSchema = z.discriminatedUnion("type", [

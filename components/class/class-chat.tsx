@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { useClassRealtime } from "@/components/class/class-realtime-provider";
+import { PushToTalk } from "@/components/class/push-to-talk";
 import { TranscriptPanel } from "@/components/learning/transcript-panel";
 
 export interface ChatMessage {
@@ -23,6 +24,7 @@ export function ClassChat({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const submittingRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -36,13 +38,13 @@ export function ClassChat({
     });
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || sending) return;
+  async function submitMessage(value: string): Promise<void> {
+    const text = value.trim();
+    if (!text || submittingRef.current) throw new Error("Message submission unavailable");
 
+    submittingRef.current = true;
     setSending(true);
     setError(undefined);
-    setInput("");
     setMessages((prev) => [
       ...prev,
       { role: "student", text },
@@ -84,20 +86,31 @@ export function ClassChat({
         }
       }
 
-      setSending(false);
     } catch {
-      // Roll back the optimistic bubbles and keep the text for a retry.
       setMessages((prev) => prev.slice(0, -2));
-      setInput(text);
       setError("Message could not be sent. Please try again.");
+      throw new Error("Message submission failed");
+    } finally {
+      submittingRef.current = false;
       setSending(false);
+    }
+  }
+
+  async function sendTypedMessage(): Promise<void> {
+    const text = input.trim();
+    if (!text || sending) return;
+    setInput("");
+    try {
+      await submitMessage(text);
+    } catch {
+      setInput(text);
     }
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void send();
+      void sendTypedMessage();
     }
   }
 
@@ -121,6 +134,8 @@ export function ClassChat({
         </p>
       ) : null}
 
+      <PushToTalk sessionId={sessionId} disabled={sending} onTranscript={submitMessage} />
+
       <div className="flex items-end gap-2">
         <textarea
           value={input}
@@ -133,8 +148,8 @@ export function ClassChat({
         />
         <button
           type="button"
-          onClick={send}
-          disabled={sending || !input.trim()}
+          onClick={() => void sendTypedMessage()}
+          disabled={sending || !input.trim() || realtime.orbState === "listening" || realtime.orbState === "thinking"}
           className="rounded-2xl bg-[#57D7FF] px-4 py-3 text-sm font-semibold text-[#07111F] transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {sending ? "…" : "Send"}

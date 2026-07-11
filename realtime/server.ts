@@ -84,6 +84,7 @@ async function main(): Promise<void> {
       let rateWindowStartedAt = now;
       let rateMessageCount = 0;
       let missedPongs = 0;
+      const transientOrbTimers = new Set<ReturnType<typeof setTimeout>>();
 
       console.info("event=connection.open", `connectionId=${connectionId}`, `userId=${user.id}`);
       send(webSocket, { type: "connection.ready", connectionId, serverTime: now });
@@ -105,6 +106,20 @@ async function main(): Promise<void> {
         console.warn("event=protocol.error", `connectionId=${connectionId}`, `errorCode=${code}`);
         send(webSocket, { type: "error", code, message: "Invalid socket message", retryable: false, requestId });
         if (protocolViolations >= MAX_PROTOCOL_VIOLATIONS) webSocket.close(4400, "Protocol violation");
+      };
+
+      const clearTransientOrbTimers = (): void => {
+        for (const timer of transientOrbTimers) clearTimeout(timer);
+        transientOrbTimers.clear();
+      };
+
+      const sendTransientOrbState = (state: "success" | "error", delay: number): void => {
+        send(webSocket, { type: "orb.state", state });
+        const timer = setTimeout(() => {
+          transientOrbTimers.delete(timer);
+          send(webSocket, { type: "orb.state", state: "idle" });
+        }, delay);
+        transientOrbTimers.add(timer);
       };
 
       webSocket.on("message", async (raw: RawData, isBinary: boolean) => {
@@ -132,6 +147,25 @@ async function main(): Promise<void> {
 
         if (parsed.data.type === "heartbeat") {
           send(webSocket, { type: "heartbeat.ack", sentAt: parsed.data.sentAt, serverTime: currentTime });
+          return;
+        }
+        if (parsed.data.type !== "class.join") {
+          if (!joined) return violate("CLASS_NOT_JOINED", parsed.data.requestId);
+          clearTransientOrbTimers();
+          if (parsed.data.type === "voice.capture.started") {
+            send(webSocket, { type: "orb.state", state: "listening" });
+          } else if (
+            parsed.data.type === "voice.capture.stopped" ||
+            parsed.data.type === "voice.transcript.completed"
+          ) {
+            send(webSocket, { type: "orb.state", state: "thinking" });
+          } else if (parsed.data.type === "voice.capture.cancelled") {
+            send(webSocket, { type: "orb.state", state: "idle" });
+          } else if (parsed.data.type === "voice.turn.completed") {
+            sendTransientOrbState("success", 700);
+          } else if (parsed.data.type === "voice.turn.failed") {
+            sendTransientOrbState("error", 1200);
+          }
           return;
         }
         if (joined) return violate("ALREADY_JOINED", parsed.data.requestId);
@@ -199,6 +233,7 @@ async function main(): Promise<void> {
       webSocket.on("close", () => {
         clearTimeout(joinTimer);
         clearInterval(heartbeatTimer);
+        clearTransientOrbTimers();
         registry.remove(connectionId);
         console.info("event=connection.close", `connectionId=${connectionId}`);
       });

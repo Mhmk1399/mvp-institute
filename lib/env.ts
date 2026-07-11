@@ -45,6 +45,8 @@ const schema = z.object({
   // Model ids come only from config — never hardcode a dated model name.
   AI_GENERATION_MODEL: requiredSecret("AI_GENERATION_MODEL is required"),
   AI_SCORING_MODEL: requiredSecret("AI_SCORING_MODEL is required"),
+  AI_TRANSCRIPTION_MODEL: z.string().min(1).default("gpt-realtime-whisper"),
+  AI_TRANSCRIPTION_DELAY: z.enum(["minimal", "low", "medium"]).default("minimal"),
   REALTIME_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
   REALTIME_ALLOWED_ORIGINS: exactOrigins,
   NEXT_PUBLIC_REALTIME_WS_URL: z.string().url().optional(),
@@ -77,6 +79,8 @@ export const env = {
   aiProvider: data.AI_PROVIDER,
   aiGenerationModel: data.AI_GENERATION_MODEL,
   aiScoringModel: data.AI_SCORING_MODEL,
+  aiTranscriptionModel: data.AI_TRANSCRIPTION_MODEL,
+  aiTranscriptionDelay: data.AI_TRANSCRIPTION_DELAY,
   realtimePort: data.REALTIME_PORT,
   realtimeAllowedOrigins: data.REALTIME_ALLOWED_ORIGINS,
   realtimeWsUrl: data.NEXT_PUBLIC_REALTIME_WS_URL,

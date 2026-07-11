@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.19
 FROM node:20-bookworm-slim
 
 WORKDIR /app
@@ -5,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-COPY . .
+COPY --exclude=.env* --exclude=.git --exclude=.next --exclude=node_modules . .
 
 EXPOSE 3001
 
