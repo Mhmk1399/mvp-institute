@@ -40,6 +40,12 @@ const NAV: Record<string, DashboardNavItem[]> = {
   ],
 };
 
+const DEFAULT_TAB: Record<string, DashboardTab> = {
+  admin: "overview",
+  teacher: "overview",
+  student: "home",
+};
+
 export function DashboardShell({
   user,
   activeTab,
@@ -54,6 +60,7 @@ export function DashboardShell({
   const searchParams = useSearchParams();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const items = NAV[user.role];
+  const defaultTab = DEFAULT_TAB[user.role];
   const title = items.find((item) => item.tab === activeTab)?.label ?? "Dashboard";
 
   const queryPrefix = useMemo(() => searchParams.toString(), [searchParams]);
@@ -69,7 +76,13 @@ export function DashboardShell({
     <div className="dashboard-bg min-h-dvh bg-[#07111F] text-[#F3F8FF]">
       <div className="mx-auto flex min-h-dvh w-full max-w-[1480px]">
         <aside className="hidden w-72 shrink-0 border-r border-white/10 bg-[#0D1B2A]/75 px-5 py-6 backdrop-blur md:block">
-          <DashboardSidebar role={user.role} items={items} activeTab={activeTab} onSelect={selectTab} />
+          <DashboardSidebar
+            role={user.role}
+            items={items}
+            activeTab={activeTab}
+            defaultTab={defaultTab}
+            onSelect={selectTab}
+          />
         </aside>
 
         {drawerOpen ? (
@@ -81,7 +94,14 @@ export function DashboardShell({
               onClick={() => setDrawerOpen(false)}
             />
             <aside className="relative h-full w-80 max-w-[86vw] border-r border-white/10 bg-[#0D1B2A] px-5 py-6 shadow-2xl">
-              <DashboardSidebar role={user.role} items={items} activeTab={activeTab} onSelect={selectTab} />
+              <DashboardSidebar
+                role={user.role}
+                items={items}
+                activeTab={activeTab}
+                defaultTab={defaultTab}
+                onSelect={selectTab}
+                onNavigateHome={() => setDrawerOpen(false)}
+              />
             </aside>
           </div>
         ) : null}

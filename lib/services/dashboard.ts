@@ -77,6 +77,8 @@ export interface ReviewRowDTO {
   needsReview: boolean;
   score?: number;
   confidence?: number;
+  correctionCount?: number;
+  taughtItemCount?: number;
   createdAt: string;
   detail: {
     prompt: string;
@@ -382,6 +384,7 @@ export async function getClassReviews(limit = 40): Promise<ReviewRowDTO[]> {
     const student = usersById.get(id(turn.userId));
     const session = sessionsById.get(id(turn.sessionId));
     const corrections = turn.corrections ?? [];
+    const taughtItems = turn.taughtInThisTurn ?? [];
     return {
       id: id(turn._id),
       type: "class",
@@ -391,12 +394,14 @@ export async function getClassReviews(limit = 40): Promise<ReviewRowDTO[]> {
       title: session?.subject ?? "Speaking class",
       status: corrections.length ? "Corrections" : "Completed",
       needsReview: corrections.length > 0,
+      correctionCount: corrections.length,
+      taughtItemCount: taughtItems.length,
       createdAt: date(turn.updatedAt),
       detail: {
         prompt: turn.studentMessage,
         response: turn.studentMessage,
         aiReply: turn.aiMessage ?? "",
-        evidence: (turn.taughtInThisTurn ?? []).map((item) => `${item.item}: ${item.evidence}`),
+        evidence: taughtItems.map((item) => `${item.item}: ${item.evidence}`),
         strengths: [],
         weaknesses: [],
         corrections,
