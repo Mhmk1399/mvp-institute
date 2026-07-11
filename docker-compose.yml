@@ -7,6 +7,18 @@ services:
       - "27017:27017"
     volumes:
       - mongo-data:/data/db
+  realtime-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.realtime
+    command: npm run realtime:gateway
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"
+    depends_on:
+      - mongo
 
 volumes:
   mongo-data:

@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "ai:smoke": "tsx scripts/smoke-ai.ts",
-    "seed:levels": "tsx scripts/seed-levels.ts"
+    "seed:levels": "tsx scripts/seed-levels.ts",
+    "realtime:gateway": "NODE_OPTIONS=--conditions=react-server tsx realtime/server.ts",
+    "realtime:dev": "NODE_OPTIONS=--conditions=react-server tsx watch realtime/server.ts"
   },
   "dependencies": {
     "mongoose": "^9.7.4",
@@ -18,6 +20,7 @@
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
     "swr": "^2.4.2",
+    "ws": "^8.21.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -25,6 +28,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.1",
     "eslint": "^9",
     "eslint-config-next": "16.2.10",
     "tailwindcss": "^4",

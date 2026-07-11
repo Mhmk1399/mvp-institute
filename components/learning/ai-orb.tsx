@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 
-type OrbState = "idle" | "listening" | "thinking" | "speaking" | "success" | "error" | "paused";
+export type OrbState = "idle" | "listening" | "thinking" | "speaking" | "success" | "error" | "paused";
 type OrbSize = "sm" | "md" | "lg";
 
 const bars = [

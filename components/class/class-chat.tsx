@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useClassRealtime } from "@/components/class/class-realtime-provider";
 import { TranscriptPanel } from "@/components/learning/transcript-panel";
 
 export interface ChatMessage {
@@ -16,6 +17,7 @@ export function ClassChat({
   sessionId: string;
   initialHistory: ChatMessage[];
 }) {
+  const realtime = useClassRealtime();
   const [messages, setMessages] = useState<ChatMessage[]>(initialHistory);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
@@ -101,6 +103,13 @@ export function ClassChat({
 
   return (
     <div className="flex min-h-[52dvh] flex-col gap-4">
+      <p className="text-right text-xs text-[#91A4B7]" role="status">
+        {realtime.status === "ready" && realtime.classReady
+          ? "Realtime connected"
+          : realtime.status === "offline"
+            ? "Offline"
+            : "Reconnecting…"}
+      </p>
       <div className="min-h-0 flex-1 overflow-y-auto rounded-3xl border border-white/10 bg-[#07111F]/35 p-4">
         <TranscriptPanel messages={messages} />
         <div ref={bottomRef} />

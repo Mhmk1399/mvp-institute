@@ -4,11 +4,12 @@ import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { env } from "@/lib/env";
+import { SESSION_COOKIE } from "@/lib/auth/constants";
 import { signJwt, verifyJwt } from "@/lib/auth/crypto";
 import { connectToDatabase } from "@/lib/db/mongoose";
 import { User, type Role } from "@/lib/models/user";
 
-export const SESSION_COOKIE = "newinstitute_session";
+export { SESSION_COOKIE } from "@/lib/auth/constants";
 
 export interface CurrentUser {
   id: string;
