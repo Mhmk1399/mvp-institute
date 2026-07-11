@@ -74,7 +74,7 @@ function toContext(context?: AICallContext) {
 export interface AICallLogInput {
   provider: string;
   model: string;
-  operation: "chat" | "chatJSON";
+  operation: "chat" | "chatJSON" | "realtime";
   prompt?: PromptIdentity;
   messages: AIMessage[];
   response?: string;

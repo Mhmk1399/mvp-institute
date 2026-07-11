@@ -24,12 +24,39 @@ export function ClassChat({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
+  const committedTurns = useRef<Set<string>>(new Set());
+
+  const voiceTurn = realtime.voiceTurn;
+  const liveVoice =
+    voiceTurn && (voiceTurn.phase === "planning" || voiceTurn.phase === "speaking")
+      ? voiceTurn
+      : undefined;
+  const voiceBusy = Boolean(liveVoice);
+
+  // Commit each completed voice turn exactly once (dedupe by turnId).
+  useEffect(() => {
+    if (voiceTurn && voiceTurn.phase === "completed" && !committedTurns.current.has(voiceTurn.turnId)) {
+      committedTurns.current.add(voiceTurn.turnId);
+      setMessages((prev) => [
+        ...prev,
+        { role: "student", text: voiceTurn.studentTranscript },
+        { role: "teacher", text: voiceTurn.teacherTranscript },
+      ]);
+    }
+  }, [voiceTurn]);
+
+  const displayMessages: ChatMessage[] = liveVoice
+    ? [
+        ...messages,
+        { role: "student", text: liveVoice.studentTranscript },
+        { role: "teacher", text: liveVoice.teacherTranscript || "…" },
+      ]
+    : messages;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, liveVoice?.studentTranscript, liveVoice?.teacherTranscript]);
 
   function updateLastTeacher(text: string) {
     setMessages((prev) => {
@@ -41,7 +68,7 @@ export function ClassChat({
 
   async function submitMessage(value: string): Promise<void> {
     const text = value.trim();
-    if (!text || submittingRef.current) throw new Error("Message submission unavailable");
+    if (!text || submittingRef.current) return;
 
     submittingRef.current = true;
     setSending(true);
@@ -60,9 +87,7 @@ export function ClassChat({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ sessionId, message: text, submissionKey }),
       });
-      if (!response.ok || !response.body) {
-        throw new Error("request failed");
-      }
+      if (!response.ok || !response.body) throw new Error("request failed");
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -70,9 +95,9 @@ export function ClassChat({
       let reply = "";
 
       for (;;) {
-        const { done, value } = await reader.read();
+        const { done, value: chunk } = await reader.read();
         if (done) break;
-        buffer += decoder.decode(value, { stream: true });
+        buffer += decoder.decode(chunk, { stream: true });
         let newline = buffer.indexOf("\n");
         while (newline >= 0) {
           const line = buffer.slice(0, newline).trim();
@@ -86,42 +111,28 @@ export function ClassChat({
           }
         }
       }
-
     } catch {
       setMessages((prev) => prev.slice(0, -2));
+      setInput(text);
       setError("Message could not be sent. Please try again.");
-      throw new Error("Message submission failed");
     } finally {
       submittingRef.current = false;
       setSending(false);
     }
   }
 
-  async function sendTypedMessage(): Promise<void> {
+  function sendTypedMessage(): void {
     const text = input.trim();
-    if (!text || sending) return;
+    if (!text || sending || voiceBusy) return;
     setInput("");
-    try {
-      await submitMessage(text);
-    } catch {
-      setInput(text);
-    }
+    void submitMessage(text);
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void sendTypedMessage();
+      sendTypedMessage();
     }
-  }
-
-  // Voice transcript lands in the composer; the student reviews then sends it.
-  function receiveVoiceTranscript(transcript: string): void {
-    const text = transcript.trim();
-    if (!text) return;
-    setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
-    setError(undefined);
-    textareaRef.current?.focus();
   }
 
   return (
@@ -134,33 +145,32 @@ export function ClassChat({
             : "Reconnecting…"}
       </p>
       <div className="min-h-0 flex-1 overflow-y-auto rounded-3xl border border-white/10 bg-[#07111F]/35 p-4">
-        <TranscriptPanel messages={messages} />
+        <TranscriptPanel messages={displayMessages} />
         <div ref={bottomRef} />
       </div>
 
-      {error ? (
+      {error || voiceTurn?.phase === "failed" ? (
         <p className="rounded-2xl bg-red-500/10 px-3 py-2 text-sm text-red-300">
-          {error}
+          {error ?? voiceTurn?.error ?? "The teacher is unavailable. Please retry."}
         </p>
       ) : null}
 
-      <PushToTalk sessionId={sessionId} disabled={sending} onTranscript={receiveVoiceTranscript} />
+      <PushToTalk sessionId={sessionId} disabled={sending || voiceBusy} />
 
       <div className="flex items-end gap-2">
         <textarea
-          ref={textareaRef}
           value={input}
-          disabled={sending}
+          disabled={sending || voiceBusy}
           rows={2}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Type your message… (Enter to send, Shift+Enter for a new line)"
+          placeholder={voiceBusy ? "The teacher is replying…" : "Type your message… (Enter to send, Shift+Enter for a new line)"}
           className="w-full resize-none rounded-3xl border border-white/12 bg-[#07111F]/45 px-4 py-3 text-sm text-[#F3F8FF] outline-none focus:border-[#57D7FF]/70 focus:ring-2 focus:ring-[#57D7FF]/15 disabled:opacity-60"
         />
         <button
           type="button"
-          onClick={() => void sendTypedMessage()}
-          disabled={sending || !input.trim() || realtime.orbState === "listening" || realtime.orbState === "thinking"}
+          onClick={sendTypedMessage}
+          disabled={sending || voiceBusy || !input.trim()}
           className="rounded-2xl bg-[#57D7FF] px-4 py-3 text-sm font-semibold text-[#07111F] transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {sending ? "…" : "Send"}

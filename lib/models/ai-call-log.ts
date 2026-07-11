@@ -18,7 +18,7 @@ const aiCallLogSchema = new Schema(
   {
     provider: { type: String, required: true },
     model: { type: String, required: true },
-    operation: { type: String, enum: ["chat", "chatJSON"], required: true },
+    operation: { type: String, enum: ["chat", "chatJSON", "realtime"], required: true },
 
     promptTemplateId: { type: String },
     promptVersion: { type: String },

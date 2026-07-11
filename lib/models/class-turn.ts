@@ -74,6 +74,15 @@ const classTurnSchema = new Schema(
     plannerAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
     replyAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
 
+    inputMode: { type: String, enum: ["text", "voice"] },
+    transcription: {
+      provider: { type: String },
+      model: { type: String },
+      transcript: { type: String },
+      completedAt: { type: Date },
+    },
+    realtimeResponseId: { type: String },
+
     submissionKey: { type: String, required: true },
 
     errorCode: { type: String },

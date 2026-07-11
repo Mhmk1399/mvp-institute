@@ -2,24 +2,23 @@ import { createHash } from "node:crypto";
 
 import { getCurrentUser } from "@/lib/auth/session";
 import { env } from "@/lib/env";
-import { getClassByIdForUser } from "@/lib/services/class";
+import { getExamByIdForUser } from "@/lib/services/exam";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const MAX_SDP_BYTES = 64 * 1024;
-const responseHeaders = {
-  "Cache-Control": "private, no-store",
-  "Content-Type": "application/json; charset=utf-8",
-};
 
 function errorResponse(message: string, status: number): Response {
-  return Response.json({ error: message }, { status, headers: responseHeaders });
+  return Response.json(
+    { error: message },
+    { status, headers: { "Cache-Control": "private, no-store" } },
+  );
 }
 
 function logFailure(code: string, userId?: string, sessionId?: string): void {
   console.warn(
-    "event=transcription.session.failed",
+    "event=exam.realtime.failed",
     `errorCode=${code}`,
     userId ? `userId=${userId}` : "userId=unknown",
     sessionId ? `sessionId=${sessionId}` : "sessionId=unknown",
@@ -56,9 +55,9 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse("Invalid session", 400);
   }
 
-  const session = await getClassByIdForUser(sessionId, user.id);
-  if (!session) return errorResponse("Not allowed", 403);
-  if (session.status !== "active") return errorResponse("Class is not active", 409);
+  const exam = await getExamByIdForUser(sessionId, user.id);
+  if (!exam) return errorResponse("Not allowed", 403);
+  if (exam.status !== "active") return errorResponse("Exam is not active", 409);
 
   const contentLength = Number(request.headers.get("content-length") ?? "0");
   if (Number.isFinite(contentLength) && contentLength > MAX_SDP_BYTES) {
@@ -80,22 +79,31 @@ export async function POST(request: Request): Promise<Response> {
 
   const form = new FormData();
   form.set("sdp", sdp);
-  form.set("session", JSON.stringify({
-    type: "transcription",
-    audio: {
-      input: {
-        transcription: {
-          model: env.aiTranscriptionModel,
-          delay: env.aiTranscriptionDelay,
+  form.set(
+    "session",
+    JSON.stringify({
+      type: "realtime",
+      model: env.aiRealtimeModel,
+      output_modalities: ["audio"],
+      instructions:
+        "You are an exam narrator. Read aloud exactly the text you are given, warmly and clearly. Never add commentary, never answer for the student, and never reveal scores or corrections.",
+      audio: {
+        input: {
+          transcription: {
+            model: env.aiTranscriptionModel,
+            delay: env.aiTranscriptionDelay,
+          },
+          turn_detection: null,
         },
-        turn_detection: null,
+        output: { voice: env.aiRealtimeVoice },
       },
-    },
-  }));
+    }),
+  );
 
   const safetyIdentifier = createHash("sha256").update(user.id).digest("hex");
+  let upstream: Response;
   try {
-    const upstream = await fetch("https://api.openai.com/v1/realtime/calls", {
+    upstream = await fetch("https://api.openai.com/v1/realtime/calls", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${env.openaiApiKey}`,
@@ -104,24 +112,27 @@ export async function POST(request: Request): Promise<Response> {
       body: form,
       cache: "no-store",
     });
-    if (!upstream.ok) {
-      logFailure("OPENAI_SESSION_REJECTED", user.id, sessionId);
-      return errorResponse("Transcription session could not be created", 502);
-    }
-    const answer = await upstream.text();
-    if (!answer.trim()) {
-      logFailure("OPENAI_EMPTY_ANSWER", user.id, sessionId);
-      return errorResponse("Transcription session could not be created", 502);
-    }
-    return new Response(answer, {
-      status: 200,
-      headers: {
-        "Cache-Control": "private, no-store",
-        "Content-Type": "application/sdp",
-      },
-    });
   } catch {
     logFailure("OPENAI_SESSION_FAILED", user.id, sessionId);
-    return errorResponse("Transcription session could not be created", 502);
+    return errorResponse("Voice session could not be created", 502);
   }
+
+  if (!upstream.ok) {
+    logFailure("OPENAI_SESSION_REJECTED", user.id, sessionId);
+    return errorResponse("Voice session could not be created", 502);
+  }
+
+  const answer = await upstream.text();
+  if (!answer.trim()) {
+    logFailure("OPENAI_EMPTY_ANSWER", user.id, sessionId);
+    return errorResponse("Voice session could not be created", 502);
+  }
+
+  return new Response(answer, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/sdp",
+      "Cache-Control": "private, no-store",
+    },
+  });
 }

@@ -8,6 +8,9 @@ export interface RealtimeConnection {
   connectedAt: number;
   lastSeenAt: number;
   sessionId?: string;
+  callId?: string;
+  /** Closes the OpenAI sideband bound to this connection, if any. */
+  closeVoice?: () => void;
 }
 
 export class RealtimeConnectionRegistry {
@@ -46,7 +49,10 @@ export class RealtimeConnectionRegistry {
   }
 
   closeAll(): void {
-    for (const connection of this.connections.values()) connection.socket.close(1001, "Gateway shutdown");
+    for (const connection of this.connections.values()) {
+      connection.closeVoice?.();
+      connection.socket.close(1001, "Gateway shutdown");
+    }
     this.connections.clear();
   }
 }

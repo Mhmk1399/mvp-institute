@@ -8,28 +8,17 @@ import {
   type TranscriptionStatus,
 } from "@/lib/client/realtime-transcription";
 
-export function PushToTalk({
-  sessionId,
-  disabled,
-  onTranscript,
-}: {
-  sessionId: string;
-  disabled: boolean;
-  onTranscript(transcript: string): void;
-}) {
+export function PushToTalk({ sessionId, disabled }: { sessionId: string; disabled: boolean }) {
   const realtime = useClassRealtime();
   const clientRef = useRef<RealtimeTranscriptionClient | null>(null);
   const mountedRef = useRef(true);
   const actionPendingRef = useRef(false);
-  const onTranscriptRef = useRef(onTranscript);
   const statusRef = useRef<TranscriptionStatus>("idle");
   const [status, setStatus] = useState<TranscriptionStatus>("idle");
   const [partial, setPartial] = useState("");
+  const [finalLocal, setFinalLocal] = useState("");
+  const [pendingStart, setPendingStart] = useState(false);
   const [safeError, setSafeError] = useState<string>();
-
-  useEffect(() => {
-    onTranscriptRef.current = onTranscript;
-  }, [onTranscript]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -40,25 +29,25 @@ export function PushToTalk({
     };
   }, [sessionId]);
 
+  // Once the gateway confirms the voice session, begin capturing.
+  useEffect(() => {
+    if (!pendingStart || !realtime.voiceReady || statusRef.current !== "ready") return;
+    setPendingStart(false);
+    clientRef.current?.start();
+    if (String(statusRef.current) === "listening") {
+      notifyLifecycle(realtime.voiceCaptureStarted);
+    } else {
+      setSafeError("Microphone could not be started.");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingStart, realtime.voiceReady]);
+
   function notifyLifecycle(notify: () => void): void {
     try {
       notify();
     } catch {
       setSafeError("Voice connection was interrupted.");
     }
-  }
-
-  function hasStatus(expected: TranscriptionStatus): boolean {
-    return statusRef.current === expected;
-  }
-
-  // Hand the finished transcript to the composer; the student reviews and sends
-  // it manually. Settle the orb back to idle so the Send button re-enables.
-  function deliverTranscript(transcript: string): void {
-    const text = transcript.trim();
-    setPartial("");
-    if (text) onTranscriptRef.current(text);
-    notifyLifecycle(realtime.voiceTurnCompleted);
   }
 
   function getClient(): RealtimeTranscriptionClient {
@@ -70,9 +59,12 @@ export function PushToTalk({
         setStatus(nextStatus);
       },
       onPartial: setPartial,
+      // Local display only — the authoritative transcript comes from the gateway.
       onFinal: ({ transcript }) => {
-        if (!mountedRef.current) return;
-        deliverTranscript(transcript);
+        if (mountedRef.current) setFinalLocal(transcript);
+      },
+      onAttach: ({ callId, attachToken }) => {
+        realtime.attachVoiceSession(callId, attachToken);
       },
       onError: (message) => setSafeError(message),
     });
@@ -84,20 +76,16 @@ export function PushToTalk({
     if (disabled || !realtime.classReady || realtime.status !== "ready" || actionPendingRef.current) return;
     actionPendingRef.current = true;
     setSafeError(undefined);
+    setFinalLocal("");
     try {
       const client = getClient();
       await client.connect();
       if (!mountedRef.current) return;
-      if (!hasStatus("ready")) {
+      if (statusRef.current !== "ready") {
         setSafeError("Voice connection is not ready yet.");
         return;
       }
-      client.start();
-      if (!hasStatus("listening")) {
-        setSafeError("Microphone could not be started.");
-        return;
-      }
-      notifyLifecycle(realtime.voiceCaptureStarted);
+      setPendingStart(true);
     } catch {
       setSafeError(
         statusRef.current === "permission-denied"
@@ -116,34 +104,43 @@ export function PushToTalk({
 
   function cancelCapture(): void {
     clientRef.current?.cancel();
+    setPendingStart(false);
     setPartial("");
+    setFinalLocal("");
     setSafeError(undefined);
     notifyLifecycle(realtime.voiceCaptureCancelled);
   }
 
   const socketReady = realtime.status === "ready" && realtime.classReady;
+  const teacherBusy =
+    realtime.voiceTurn?.phase === "planning" || realtime.voiceTurn?.phase === "speaking";
   const listening = status === "listening";
   const finalizing = status === "finalizing";
+  const preparing = pendingStart || status === "connecting";
   const canCancel = listening || finalizing;
+
   const primaryLabel = !socketReady
     ? "Connecting voice…"
-    : status === "connecting"
+    : preparing
       ? "Connecting…"
       : listening
         ? "Stop"
         : finalizing
           ? "Transcribing…"
-          : status === "permission-denied"
-            ? "Microphone denied"
-            : status === "unsupported" || status === "error"
-              ? "Voice unavailable"
-              : "Speak";
+          : teacherBusy
+            ? "Teacher speaking…"
+            : status === "permission-denied"
+              ? "Microphone denied"
+              : status === "unsupported" || status === "error"
+                ? "Voice unavailable"
+                : "Speak";
 
   const primaryDisabled =
     (disabled && !listening) ||
     !socketReady ||
-    status === "connecting" ||
+    preparing ||
     finalizing ||
+    (teacherBusy && !listening) ||
     status === "permission-denied" ||
     status === "unsupported";
 
@@ -174,11 +171,13 @@ export function PushToTalk({
           </button>
         ) : null}
         <span className="text-xs text-[#91A4B7]" role="status">
-          {listening ? "Listening…" : finalizing ? "Transcribing…" : ""}
+          {listening ? "Listening…" : finalizing ? "Transcribing…" : teacherBusy ? "Teacher is replying…" : ""}
         </span>
       </div>
       {partial ? (
         <p className="mt-3 text-sm text-[#DDF7FF]" aria-live="polite">{partial}</p>
+      ) : finalLocal ? (
+        <p className="mt-3 text-sm text-[#91A4B7]" aria-live="polite">{finalLocal}</p>
       ) : null}
       {safeError || (!socketReady && realtime.lastError) ? (
         <p className="mt-2 text-xs text-red-300">{safeError ?? realtime.lastError}</p>

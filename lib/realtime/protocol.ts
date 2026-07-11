@@ -47,6 +47,12 @@ export const clientRealtimeEventSchema = z.discriminatedUnion("type", [
     type: z.literal("voice.turn.failed"),
     requestId: requestIdSchema,
   }).strict(),
+  z.object({
+    type: z.literal("voice.session.attach"),
+    requestId: requestIdSchema,
+    callId: z.string().min(1).max(200),
+    attachToken: z.string().min(1).max(4000),
+  }).strict(),
 ]);
 
 export const serverRealtimeEventSchema = z.discriminatedUnion("type", [
@@ -83,6 +89,31 @@ export const serverRealtimeEventSchema = z.discriminatedUnion("type", [
     message: z.string(),
     retryable: z.boolean(),
     requestId: requestIdSchema.optional(),
+  }).strict(),
+  z.object({
+    type: z.literal("voice.session.ready"),
+    requestId: requestIdSchema,
+  }).strict(),
+  z.object({
+    type: z.literal("student.transcript.final"),
+    turnId: objectIdSchema,
+    transcript: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal("teacher.reply.delta"),
+    turnId: objectIdSchema,
+    text: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal("teacher.reply.done"),
+    turnId: objectIdSchema,
+    text: z.string(),
+  }).strict(),
+  z.object({
+    type: z.literal("teacher.turn.failed"),
+    turnId: objectIdSchema.optional(),
+    message: z.string(),
+    retryable: z.boolean(),
   }).strict(),
 ]);
 

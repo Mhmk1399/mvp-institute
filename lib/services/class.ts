@@ -87,6 +87,14 @@ export interface ClassTurnDTO {
   };
   plannerAiCallId?: string;
   replyAiCallId?: string;
+  inputMode?: "text" | "voice";
+  transcription?: {
+    provider: string;
+    model: string;
+    transcript: string;
+    completedAt: string;
+  };
+  realtimeResponseId?: string;
   submissionKey: string;
   errorCode?: string;
   createdAt: string;
@@ -200,6 +208,19 @@ function toTurnDTO(doc: TurnLean): ClassTurnDTO {
       : undefined,
     plannerAiCallId: doc.plannerAiCallId ? String(doc.plannerAiCallId) : undefined,
     replyAiCallId: doc.replyAiCallId ? String(doc.replyAiCallId) : undefined,
+    inputMode: (doc.inputMode as "text" | "voice" | undefined) ?? undefined,
+    transcription:
+      doc.transcription && doc.transcription.transcript
+        ? {
+            provider: doc.transcription.provider ?? "openai",
+            model: doc.transcription.model ?? "",
+            transcript: doc.transcription.transcript,
+            completedAt: doc.transcription.completedAt
+              ? doc.transcription.completedAt.toISOString()
+              : "",
+          }
+        : undefined,
+    realtimeResponseId: doc.realtimeResponseId ?? undefined,
     submissionKey: doc.submissionKey,
     errorCode: doc.errorCode ?? undefined,
     createdAt: doc.createdAt.toISOString(),
@@ -358,6 +379,7 @@ export async function createProcessingTurn(input: {
   index: number;
   studentMessage: string;
   submissionKey: string;
+  inputMode?: "text" | "voice";
 }): Promise<ClassTurnDTO> {
   await connectToDatabase();
   try {
@@ -368,6 +390,7 @@ export async function createProcessingTurn(input: {
       status: "processing",
       studentMessage: input.studentMessage,
       submissionKey: input.submissionKey,
+      inputMode: input.inputMode,
     });
     return toTurnDTO(doc.toObject() as TurnLean);
   } catch (error) {
@@ -395,6 +418,9 @@ export async function completeClassTurn(input: {
   plannerAiCallId?: string;
   replyAiCallId?: string;
   aiCallId?: string;
+  inputMode?: "text" | "voice";
+  transcription?: { provider: "openai"; model: string; transcript: string; completedAt: Date };
+  realtimeResponseId?: string;
 }): Promise<ClassTurnDTO | null> {
   await connectToDatabase();
   const doc = await ClassTurn.findOneAndUpdate(
@@ -412,6 +438,9 @@ export async function completeClassTurn(input: {
         plannerAiCallId: input.plannerAiCallId,
         replyAiCallId: input.replyAiCallId,
         aiCallId: input.aiCallId,
+        inputMode: input.inputMode,
+        transcription: input.transcription,
+        realtimeResponseId: input.realtimeResponseId,
       },
     },
     { returnDocument: "after" },
