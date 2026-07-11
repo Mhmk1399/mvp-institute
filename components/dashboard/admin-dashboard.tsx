@@ -7,7 +7,7 @@ import { ProfilePanel } from "@/components/dashboard/profile-panel";
 import { ReportsPanel } from "@/components/dashboard/reports-panel";
 import { ReviewPanel } from "@/components/dashboard/review-panel";
 import { UsersPanel } from "@/components/dashboard/users-panel";
-import type { DashboardPageData } from "@/app/dashboard/page";
+import type { DashboardPageData } from "@/lib/dashboard/data";
 import type { DashboardTab } from "@/lib/schemas/dashboard";
 
 export function AdminDashboard({ activeTab, data }: { activeTab: DashboardTab; data: DashboardPageData }) {

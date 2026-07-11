@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 
 import { AdminDashboard } from "@/components/dashboard/admin-dashboard";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
@@ -9,8 +8,9 @@ import { DashboardSidebar, type DashboardNavItem } from "@/components/dashboard/
 import { StudentDashboard } from "@/components/dashboard/student-dashboard";
 import { TeacherDashboard } from "@/components/dashboard/teacher-dashboard";
 import type { CurrentUser } from "@/lib/auth/session";
+import { useDashboardData } from "@/lib/client/dashboard-cache";
+import type { DashboardPageData } from "@/lib/dashboard/data";
 import type { DashboardTab } from "@/lib/schemas/dashboard";
-import type { DashboardPageData } from "@/app/dashboard/page";
 
 const NAV: Record<string, DashboardNavItem[]> = {
   admin: [
@@ -48,28 +48,41 @@ const DEFAULT_TAB: Record<string, DashboardTab> = {
 
 export function DashboardShell({
   user,
-  activeTab,
-  data,
+  initialTab,
+  initialData,
 }: {
   user: CurrentUser;
-  activeTab: DashboardTab;
-  data: DashboardPageData;
+  initialTab: DashboardTab;
+  initialData: DashboardPageData;
 }) {
-  const router = useRouter();
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const [currentTab, setCurrentTab] = useState(initialTab);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const items = NAV[user.role];
   const defaultTab = DEFAULT_TAB[user.role];
-  const title = items.find((item) => item.tab === activeTab)?.label ?? "Dashboard";
+  const title = items.find((item) => item.tab === currentTab)?.label ?? "Dashboard";
+  const { data, error, isLoading, isValidating, mutate } = useDashboardData({
+    tab: currentTab,
+    initialTab,
+    initialData,
+  });
 
-  const queryPrefix = useMemo(() => searchParams.toString(), [searchParams]);
+  useEffect(() => {
+    function syncTabFromHistory() {
+      const rawTab = new URL(window.location.href).searchParams.get("tab");
+      const tab = items.find((item) => item.tab === rawTab)?.tab ?? defaultTab;
+      setCurrentTab(tab);
+      setDrawerOpen(false);
+    }
+
+    window.addEventListener("popstate", syncTabFromHistory);
+    return () => window.removeEventListener("popstate", syncTabFromHistory);
+  }, [defaultTab, items]);
 
   function selectTab(tab: DashboardTab) {
-    const params = new URLSearchParams(queryPrefix);
-    params.set("tab", tab);
+    if (!items.some((item) => item.tab === tab)) return;
+    setCurrentTab(tab);
     setDrawerOpen(false);
-    router.push(`${pathname}?${params.toString()}`, { scroll: false });
+    window.history.pushState(null, "", `/dashboard?tab=${encodeURIComponent(tab)}`);
   }
 
   return (
@@ -79,7 +92,7 @@ export function DashboardShell({
           <DashboardSidebar
             role={user.role}
             items={items}
-            activeTab={activeTab}
+            activeTab={currentTab}
             defaultTab={defaultTab}
             onSelect={selectTab}
           />
@@ -97,7 +110,7 @@ export function DashboardShell({
               <DashboardSidebar
                 role={user.role}
                 items={items}
-                activeTab={activeTab}
+                activeTab={currentTab}
                 defaultTab={defaultTab}
                 onSelect={selectTab}
                 onNavigateHome={() => setDrawerOpen(false)}
@@ -109,13 +122,31 @@ export function DashboardShell({
         <section className="flex min-w-0 flex-1 flex-col">
           <DashboardHeader user={user} title={title} onMenu={() => setDrawerOpen(true)} />
           <main className="min-w-0 flex-1 px-4 py-5 md:px-7 md:py-7">
-            {user.role === "admin" ? (
-              <AdminDashboard activeTab={activeTab} data={data} />
-            ) : user.role === "teacher" ? (
-              <TeacherDashboard activeTab={activeTab} data={data} />
-            ) : (
-              <StudentDashboard activeTab={activeTab} data={data} />
-            )}
+            {isValidating && data ? (
+              <p className="mb-3 text-xs text-[#91A4B7]" role="status">Refreshing…</p>
+            ) : null}
+            {error && !data ? (
+              <div className="rounded-2xl border border-red-300/20 bg-red-950/20 p-5">
+                <p className="text-sm text-red-100">Dashboard data could not be loaded.</p>
+                <button
+                  type="button"
+                  className="mt-3 rounded-xl border border-white/15 px-3 py-2 text-sm font-medium hover:bg-white/5"
+                  onClick={() => void mutate()}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : isLoading && !data ? (
+              <p className="text-sm text-[#91A4B7]" role="status">Loading dashboard…</p>
+            ) : data ? (
+              user.role === "admin" ? (
+                <AdminDashboard activeTab={currentTab} data={data} />
+              ) : user.role === "teacher" ? (
+                <TeacherDashboard activeTab={currentTab} data={data} />
+              ) : (
+                <StudentDashboard activeTab={currentTab} data={data} />
+              )
+            ) : null}
           </main>
         </section>
       </div>

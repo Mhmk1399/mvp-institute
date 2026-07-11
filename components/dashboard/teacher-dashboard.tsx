@@ -6,7 +6,7 @@ import { OverviewPanel } from "@/components/dashboard/overview-panel";
 import { ProfilePanel } from "@/components/dashboard/profile-panel";
 import { ReportsPanel } from "@/components/dashboard/reports-panel";
 import { ReviewPanel } from "@/components/dashboard/review-panel";
-import type { DashboardPageData } from "@/app/dashboard/page";
+import type { DashboardPageData } from "@/lib/dashboard/data";
 import type { DashboardTab } from "@/lib/schemas/dashboard";
 
 export function TeacherDashboard({ activeTab, data }: { activeTab: DashboardTab; data: DashboardPageData }) {

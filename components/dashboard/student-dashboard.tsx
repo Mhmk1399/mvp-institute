@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { ProfilePanel } from "@/components/dashboard/profile-panel";
 import { StudentHomePanel } from "@/components/dashboard/overview-panel";
-import type { DashboardPageData } from "@/app/dashboard/page";
+import type { DashboardPageData } from "@/lib/dashboard/data";
 import type { DashboardTab } from "@/lib/schemas/dashboard";
 
 export function StudentDashboard({ activeTab, data }: { activeTab: DashboardTab; data: DashboardPageData }) {
