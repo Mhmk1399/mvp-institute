@@ -7,9 +7,30 @@ import { User } from "@/lib/models/user";
 import { ExamSession, type ExamSessionDoc } from "@/lib/models/exam-session";
 import { ExamTurn, type ExamTurnDoc } from "@/lib/models/exam-turn";
 import type { CEFRCode, ExamSkill } from "@/lib/exam/engine";
+import type { EvidenceIntent, TaskType } from "@/lib/exam/competency-engine";
 
 type SessionLean = ExamSessionDoc & { createdAt: Date; updatedAt: Date };
 type TurnLean = ExamTurnDoc & { createdAt: Date; updatedAt: Date };
+
+export interface ExamCompetencyProjectionDTO {
+  estimatedLevel: CEFRCode;
+  strictAchievedLevel?: CEFRCode;
+  confidence: number;
+  confidenceBand: "low" | "medium" | "high";
+  usedLegacyFallback: boolean;
+  validObservationCount: number;
+  distinctDomainCount: number;
+  domainScores: Array<{ domain: string; support: number; observationCount: number }>;
+}
+
+export interface ExamCompetencyCandidateDTO {
+  competencyCode: string;
+  result: "positive" | "negative" | "insufficient";
+  accuracy: number;
+  confidence: number;
+  independence: "spontaneous" | "prompted" | "imitated";
+  evidenceExcerpt: string;
+}
 
 export interface ExamSessionDTO {
   id: string;
@@ -21,6 +42,12 @@ export interface ExamSessionDTO {
   coveredGoalKeys: string[];
   finalLevel?: CEFRCode;
   completedAt?: string;
+  targetedCompetencyCodes: string[];
+  recentCompetencyProjectionLevels: CEFRCode[];
+  recentCompetencyProjectionConfidences: number[];
+  profileNeedsTeacherReview: boolean;
+  completionReason?: "converged" | "hard-stop" | "legacy-fallback";
+  competencyProjection?: ExamCompetencyProjectionDTO;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +85,16 @@ export interface ExamTurnDTO {
   abilityAfter?: number;
   projectedLevelAfter?: CEFRCode;
   submissionKey?: string;
+  targetCompetencyCode?: string;
+  relatedCompetencyCodes: string[];
+  evidenceIntent?: string;
+  contextKey?: string;
+  taskType?: string;
+  pronunciationEligible: boolean;
+  listeningEligible: boolean;
+  competencyCandidates: ExamCompetencyCandidateDTO[];
+  competencyObservationIds: string[];
+  competencySyncStatus: "not-required" | "pending" | "completed" | "failed";
   createdAt: string;
   updatedAt: string;
 }
@@ -82,6 +119,30 @@ function toSessionDTO(doc: SessionLean): ExamSessionDTO {
     coveredGoalKeys: [...doc.coveredGoalKeys],
     finalLevel: (doc.finalLevel as CEFRCode | undefined) ?? undefined,
     completedAt: doc.completedAt ? doc.completedAt.toISOString() : undefined,
+    targetedCompetencyCodes: [...(doc.targetedCompetencyCodes ?? [])],
+    recentCompetencyProjectionLevels: [...(doc.recentCompetencyProjectionLevels ?? [])] as CEFRCode[],
+    recentCompetencyProjectionConfidences: [...(doc.recentCompetencyProjectionConfidences ?? [])],
+    profileNeedsTeacherReview: doc.profileNeedsTeacherReview ?? false,
+    completionReason:
+      (doc.completionReason as ExamSessionDTO["completionReason"] | undefined) ?? undefined,
+    competencyProjection: doc.competencyProjection?.estimatedLevel
+      ? {
+          estimatedLevel: doc.competencyProjection.estimatedLevel as CEFRCode,
+          strictAchievedLevel:
+            (doc.competencyProjection.strictAchievedLevel as CEFRCode | undefined) ?? undefined,
+          confidence: doc.competencyProjection.confidence ?? 0,
+          confidenceBand:
+            (doc.competencyProjection.confidenceBand as "low" | "medium" | "high") ?? "low",
+          usedLegacyFallback: doc.competencyProjection.usedLegacyFallback ?? false,
+          validObservationCount: doc.competencyProjection.validObservationCount ?? 0,
+          distinctDomainCount: doc.competencyProjection.distinctDomainCount ?? 0,
+          domainScores: (doc.competencyProjection.domainScores ?? []).map((entry) => ({
+            domain: entry.domain ?? "",
+            support: entry.support ?? 0,
+            observationCount: entry.observationCount ?? 0,
+          })),
+        }
+      : undefined,
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
@@ -123,6 +184,24 @@ function toTurnDTO(doc: TurnLean): ExamTurnDTO {
     abilityAfter: doc.abilityAfter ?? undefined,
     projectedLevelAfter: (doc.projectedLevelAfter as CEFRCode | undefined) ?? undefined,
     submissionKey: doc.submissionKey ?? undefined,
+    targetCompetencyCode: doc.targetCompetencyCode ?? undefined,
+    relatedCompetencyCodes: [...(doc.relatedCompetencyCodes ?? [])],
+    evidenceIntent: doc.evidenceIntent ?? undefined,
+    contextKey: doc.contextKey ?? undefined,
+    taskType: doc.taskType ?? undefined,
+    pronunciationEligible: doc.pronunciationEligible ?? false,
+    listeningEligible: doc.listeningEligible ?? false,
+    competencyCandidates: (doc.competencyCandidates ?? []).map((candidate) => ({
+      competencyCode: candidate.competencyCode,
+      result: candidate.result as ExamCompetencyCandidateDTO["result"],
+      accuracy: candidate.accuracy,
+      confidence: candidate.confidence,
+      independence: candidate.independence as ExamCompetencyCandidateDTO["independence"],
+      evidenceExcerpt: candidate.evidenceExcerpt,
+    })),
+    competencyObservationIds: (doc.competencyObservationIds ?? []).map((id) => String(id)),
+    competencySyncStatus:
+      (doc.competencySyncStatus as ExamTurnDTO["competencySyncStatus"] | undefined) ?? "not-required",
     createdAt: doc.createdAt.toISOString(),
     updatedAt: doc.updatedAt.toISOString(),
   };
@@ -197,6 +276,13 @@ export interface CreateQuestionTurnInput {
   question: string;
   abilityBefore: number;
   questionAiCallId?: string;
+  targetCompetencyCode?: string;
+  relatedCompetencyCodes?: string[];
+  evidenceIntent?: EvidenceIntent;
+  contextKey?: string;
+  taskType?: TaskType;
+  pronunciationEligible?: boolean;
+  listeningEligible?: boolean;
 }
 
 export async function createQuestionTurn(
@@ -217,6 +303,14 @@ export async function createQuestionTurn(
       abilityBefore: input.abilityBefore,
       needsTeacherReview: false,
       questionAiCallId: input.questionAiCallId,
+      targetCompetencyCode: input.targetCompetencyCode,
+      relatedCompetencyCodes: input.relatedCompetencyCodes ?? [],
+      evidenceIntent: input.evidenceIntent,
+      contextKey: input.contextKey,
+      taskType: input.taskType,
+      pronunciationEligible: input.pronunciationEligible ?? false,
+      listeningEligible: input.listeningEligible ?? false,
+      competencySyncStatus: "not-required",
     });
     return toTurnDTO(doc.toObject() as TurnLean);
   } catch (error) {
@@ -281,6 +375,7 @@ export interface SaveScoredTurnInput {
   abilityAfter: number;
   projectedLevelAfter: CEFRCode;
   scoreAiCallId?: string;
+  competencyCandidates?: ExamCompetencyCandidateDTO[];
 }
 
 export async function saveScoredTurn(
@@ -298,6 +393,8 @@ export async function saveScoredTurn(
         abilityAfter: input.abilityAfter,
         projectedLevelAfter: input.projectedLevelAfter,
         scoreAiCallId: input.scoreAiCallId,
+        competencyCandidates: input.competencyCandidates ?? [],
+        competencySyncStatus: input.competencyCandidates?.length ? "pending" : "not-required",
       },
     },
     { returnDocument: "after" },
@@ -309,6 +406,72 @@ export async function saveScoredTurn(
     sessionId: input.sessionId,
   }).lean<TurnLean | null>();
   return existing ? toTurnDTO(existing) : null;
+}
+
+/** Mark a scored turn's competency observations synced (idempotent). */
+export async function markExamTurnCompetencySynced(input: {
+  turnId: string;
+  sessionId: string;
+  observationIds: string[];
+}): Promise<void> {
+  await connectToDatabase();
+  await ExamTurn.updateOne(
+    { _id: input.turnId, sessionId: input.sessionId },
+    {
+      $set: {
+        competencyObservationIds: input.observationIds.map((id) => new mongoose.Types.ObjectId(id)),
+        competencySyncStatus: "completed",
+      },
+    },
+  );
+}
+
+export async function markExamTurnCompetencyFailed(input: {
+  turnId: string;
+  sessionId: string;
+}): Promise<void> {
+  await connectToDatabase();
+  await ExamTurn.updateOne(
+    { _id: input.turnId, sessionId: input.sessionId },
+    { $set: { competencySyncStatus: "failed" } },
+  );
+}
+
+/** Persist the latest competency projection + rolling history on the session. */
+export async function applyExamCompetencyProjection(input: {
+  sessionId: string;
+  projection: ExamCompetencyProjectionDTO;
+  targetedCompetencyCodes: string[];
+}): Promise<ExamSessionDTO | null> {
+  await connectToDatabase();
+  const session = await ExamSession.findOne({ _id: input.sessionId }).lean<SessionLean | null>();
+  if (!session) return null;
+
+  const levels = [
+    ...(session.recentCompetencyProjectionLevels ?? []),
+    input.projection.estimatedLevel,
+  ].slice(-3);
+  const confidences = [
+    ...(session.recentCompetencyProjectionConfidences ?? []),
+    input.projection.confidence,
+  ].slice(-3);
+  const targeted = Array.from(
+    new Set([...(session.targetedCompetencyCodes ?? []), ...input.targetedCompetencyCodes]),
+  );
+
+  const doc = await ExamSession.findOneAndUpdate(
+    { _id: input.sessionId },
+    {
+      $set: {
+        competencyProjection: input.projection,
+        recentCompetencyProjectionLevels: levels,
+        recentCompetencyProjectionConfidences: confidences,
+        targetedCompetencyCodes: targeted,
+      },
+    },
+    { returnDocument: "after" },
+  ).lean<SessionLean | null>();
+  return doc ? toSessionDTO(doc) : null;
 }
 
 /**
@@ -363,6 +526,8 @@ export async function completeExam(input: {
   sessionId: string;
   userId: string;
   finalLevel: CEFRCode;
+  completionReason?: "converged" | "hard-stop" | "legacy-fallback";
+  profileNeedsTeacherReview?: boolean;
 }): Promise<ExamSessionDTO | null> {
   await connectToDatabase();
 
@@ -372,6 +537,10 @@ export async function completeExam(input: {
       status: "completed" as const,
       finalLevel: input.finalLevel,
       completedAt: new Date(),
+      ...(input.completionReason ? { completionReason: input.completionReason } : {}),
+      ...(input.profileNeedsTeacherReview !== undefined
+        ? { profileNeedsTeacherReview: input.profileNeedsTeacherReview }
+        : {}),
     },
   };
   const userUpdate = {

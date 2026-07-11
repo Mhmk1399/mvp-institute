@@ -12,7 +12,7 @@ import {
 } from "@/lib/realtime/protocol";
 import { RealtimeConnectionRegistry, type RealtimeConnection } from "@/lib/realtime/registry";
 import type { ClassSessionDTO } from "@/lib/services/class";
-import type { ApprovedTeacherPlan } from "@/lib/class/teacher-plan";
+import type { ApprovedTeacherPlanV2 } from "@/lib/class/teacher-plan";
 import type { OpenAISideband } from "@/lib/realtime/openai-sideband";
 
 loadEnvConfig(process.cwd());
@@ -26,7 +26,7 @@ const MAX_PROTOCOL_VIOLATIONS = 3;
 interface VoiceTurnState {
   turnId: string;
   submissionKey: string;
-  approvedPlan: ApprovedTeacherPlan;
+  approvedPlan: ApprovedTeacherPlanV2;
   recentTurns: string[];
   instructions: string;
   studentTranscript: string;
@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     import("@/lib/realtime/auth"),
     import("@/lib/services/class"),
     import("@/lib/class/teacher-turn-runtime"),
-    import("@/lib/ai/prompts/class-realtime-reply.v1"),
+    import("@/lib/ai/prompts/class-realtime-reply.v2"),
     import("@/lib/realtime/voice-session"),
     import("@/lib/realtime/openai-sideband"),
     import("@/lib/ai/logger"),
@@ -274,6 +274,7 @@ async function main(): Promise<void> {
           await finalizeTeacherTurn({
             session: joinedSession,
             userId: user.id,
+            turnId: current.turnId,
             submissionKey: current.submissionKey,
             approvedPlan: current.approvedPlan,
             studentMessage: current.studentTranscript,

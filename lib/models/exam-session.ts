@@ -26,6 +26,31 @@ const examSessionSchema = new Schema(
     coveredGoalKeys: { type: [String], default: [] },
     finalLevel: { type: String, enum: [...CEFR_ORDER] },
     completedAt: { type: Date },
+
+    // ML6 competency-aware fields (optional, backward-compatible).
+    competencyProjection: {
+      estimatedLevel: { type: String, enum: [...CEFR_ORDER] },
+      strictAchievedLevel: { type: String, enum: [...CEFR_ORDER] },
+      confidence: { type: Number },
+      confidenceBand: { type: String, enum: ["low", "medium", "high"] },
+      usedLegacyFallback: { type: Boolean },
+      validObservationCount: { type: Number },
+      distinctDomainCount: { type: Number },
+      domainScores: {
+        type: [
+          new Schema(
+            { domain: { type: String }, support: { type: Number }, observationCount: { type: Number } },
+            { _id: false },
+          ),
+        ],
+        default: [],
+      },
+    },
+    recentCompetencyProjectionLevels: { type: [{ type: String, enum: [...CEFR_ORDER] }], default: [] },
+    recentCompetencyProjectionConfidences: { type: [Number], default: [] },
+    targetedCompetencyCodes: { type: [String], default: [] },
+    profileNeedsTeacherReview: { type: Boolean, default: false },
+    completionReason: { type: String, enum: ["converged", "hard-stop", "legacy-fallback"] },
   },
   { timestamps: true },
 );

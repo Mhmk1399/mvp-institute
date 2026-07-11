@@ -4,6 +4,7 @@ import { connectToDatabase } from "@/lib/db/mongoose";
 import { ClassSession, type ClassSessionDoc } from "@/lib/models/class-session";
 import { ClassTurn, type ClassTurnDoc } from "@/lib/models/class-turn";
 import type { CEFRCode } from "@/lib/exam/engine";
+import mongoose from "mongoose";
 
 type ItemType = "vocabulary" | "grammar" | "function";
 type SessionLean = ClassSessionDoc & { createdAt: Date; updatedAt: Date };
@@ -51,6 +52,8 @@ export interface ClassSessionDTO {
   targetedGoals: string[];
   taughtItems: TaughtItemDTO[];
   pendingElicitedTargets: string[];
+  practisedCompetencyCodes: string[];
+  recentCompetencyCodes: string[];
   runningSummary: string;
   finalSummary?: FinalSummaryDTO;
   turnCount: number;
@@ -77,6 +80,9 @@ export interface ClassTurnDTO {
     targetGoal?: string;
     turnObjective: string;
     languageMode: string;
+    targetCompetencyCode?: string;
+    evidenceIntent?: string;
+    contextKey?: string;
   };
   responsePlan?: {
     acknowledgement?: string;
@@ -95,6 +101,20 @@ export interface ClassTurnDTO {
     completedAt: string;
   };
   realtimeResponseId?: string;
+  targetCompetencyCode?: string;
+  relatedCompetencyCodes: string[];
+  evidenceIntent?: string;
+  competencyContextKey?: string;
+  competencyCandidates: Array<{
+    competencyCode: string;
+    result: "positive" | "negative" | "insufficient";
+    accuracy: number;
+    confidence: number;
+    independence: "spontaneous" | "prompted" | "imitated";
+    evidenceExcerpt: string;
+  }>;
+  competencyObservationIds: string[];
+  competencySyncStatus: "not-required" | "pending" | "completed" | "failed";
   submissionKey: string;
   errorCode?: string;
   createdAt: string;
@@ -147,6 +167,8 @@ function toSessionDTO(doc: SessionLean): ClassSessionDTO {
       turnId: item.turnId ? String(item.turnId) : undefined,
     })),
     pendingElicitedTargets: [...doc.pendingElicitedTargets],
+    practisedCompetencyCodes: [...(doc.practisedCompetencyCodes ?? [])],
+    recentCompetencyCodes: [...(doc.recentCompetencyCodes ?? [])],
     runningSummary: doc.runningSummary,
     finalSummary: doc.finalSummary
       ? {
@@ -195,6 +217,9 @@ function toTurnDTO(doc: TurnLean): ClassTurnDTO {
           targetGoal: doc.teacherDecision.targetGoal ?? undefined,
           turnObjective: doc.teacherDecision.turnObjective,
           languageMode: doc.teacherDecision.languageMode,
+          targetCompetencyCode: doc.teacherDecision.targetCompetencyCode ?? undefined,
+          evidenceIntent: doc.teacherDecision.evidenceIntent ?? undefined,
+          contextKey: doc.teacherDecision.contextKey ?? undefined,
         }
       : undefined,
     responsePlan: doc.responsePlan
@@ -221,6 +246,21 @@ function toTurnDTO(doc: TurnLean): ClassTurnDTO {
           }
         : undefined,
     realtimeResponseId: doc.realtimeResponseId ?? undefined,
+    targetCompetencyCode: doc.targetCompetencyCode ?? undefined,
+    relatedCompetencyCodes: [...(doc.relatedCompetencyCodes ?? [])],
+    evidenceIntent: doc.evidenceIntent ?? undefined,
+    competencyContextKey: doc.competencyContextKey ?? undefined,
+    competencyCandidates: (doc.competencyCandidates ?? []).map((candidate) => ({
+      competencyCode: candidate.competencyCode,
+      result: candidate.result as "positive" | "negative" | "insufficient",
+      accuracy: candidate.accuracy,
+      confidence: candidate.confidence,
+      independence: candidate.independence as "spontaneous" | "prompted" | "imitated",
+      evidenceExcerpt: candidate.evidenceExcerpt,
+    })),
+    competencyObservationIds: (doc.competencyObservationIds ?? []).map((id) => String(id)),
+    competencySyncStatus:
+      (doc.competencySyncStatus as ClassTurnDTO["competencySyncStatus"] | undefined) ?? "not-required",
     submissionKey: doc.submissionKey,
     errorCode: doc.errorCode ?? undefined,
     createdAt: doc.createdAt.toISOString(),
@@ -421,6 +461,12 @@ export async function completeClassTurn(input: {
   inputMode?: "text" | "voice";
   transcription?: { provider: "openai"; model: string; transcript: string; completedAt: Date };
   realtimeResponseId?: string;
+  targetCompetencyCode?: string;
+  relatedCompetencyCodes?: string[];
+  evidenceIntent?: string;
+  competencyContextKey?: string;
+  competencyCandidates?: ClassTurnDTO["competencyCandidates"];
+  competencySyncStatus?: ClassTurnDTO["competencySyncStatus"];
 }): Promise<ClassTurnDTO | null> {
   await connectToDatabase();
   const doc = await ClassTurn.findOneAndUpdate(
@@ -441,6 +487,12 @@ export async function completeClassTurn(input: {
         inputMode: input.inputMode,
         transcription: input.transcription,
         realtimeResponseId: input.realtimeResponseId,
+        targetCompetencyCode: input.targetCompetencyCode,
+        relatedCompetencyCodes: input.relatedCompetencyCodes ?? [],
+        evidenceIntent: input.evidenceIntent,
+        competencyContextKey: input.competencyContextKey,
+        competencyCandidates: input.competencyCandidates ?? [],
+        competencySyncStatus: input.competencySyncStatus ?? "not-required",
       },
     },
     { returnDocument: "after" },
@@ -465,6 +517,55 @@ export async function failClassTurn(input: {
     { returnDocument: "after" },
   ).lean<TurnLean | null>();
   return doc ? toTurnDTO(doc) : null;
+}
+
+export async function markClassTurnCompetencySynced(input: {
+  sessionId: string;
+  submissionKey: string;
+  observationIds: string[];
+}): Promise<void> {
+  await connectToDatabase();
+  await ClassTurn.updateOne(
+    { sessionId: input.sessionId, submissionKey: input.submissionKey },
+    {
+      $set: {
+        competencyObservationIds: input.observationIds.map((id) => new mongoose.Types.ObjectId(id)),
+        competencySyncStatus: "completed",
+      },
+    },
+  );
+}
+
+export async function markClassTurnCompetencyFailed(input: {
+  sessionId: string;
+  submissionKey: string;
+}): Promise<void> {
+  await connectToDatabase();
+  await ClassTurn.updateOne(
+    { sessionId: input.sessionId, submissionKey: input.submissionKey },
+    { $set: { competencySyncStatus: "failed" } },
+  );
+}
+
+export async function appendClassCompetencyCodes(input: {
+  sessionId: string;
+  userId: string;
+  code: string;
+}): Promise<void> {
+  await connectToDatabase();
+  const session = await ClassSession.findOne({ _id: input.sessionId, userId: input.userId })
+    .select("practisedCompetencyCodes recentCompetencyCodes")
+    .lean<{ practisedCompetencyCodes?: string[]; recentCompetencyCodes?: string[] } | null>();
+  if (!session) return;
+  const practised = Array.from(new Set([...(session.practisedCompetencyCodes ?? []), input.code]));
+  const recent = [
+    input.code,
+    ...(session.recentCompetencyCodes ?? []).filter((c) => c !== input.code),
+  ].slice(0, 8);
+  await ClassSession.updateOne(
+    { _id: input.sessionId, userId: input.userId },
+    { $set: { practisedCompetencyCodes: practised, recentCompetencyCodes: recent } },
+  );
 }
 
 /**

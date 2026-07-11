@@ -3,72 +3,46 @@ import "server-only";
 import { env } from "@/lib/env";
 import { getAIProvider } from "@/lib/ai/client";
 import {
-  promptIdentity as plannerPromptIdentity,
-  buildMessages as buildPlannerMessages,
-  teacherPlannerOutputSchema,
-} from "@/lib/ai/prompts/teacher-planner.v1";
+  promptIdentity as plannerV2PromptIdentity,
+  buildMessages as buildPlannerV2Messages,
+  teacherPlannerV2OutputSchema,
+} from "@/lib/ai/prompts/teacher-planner.v2";
 import {
   promptIdentity as summaryPromptIdentity,
   buildMessages as buildSummaryMessages,
   sessionSummaryOutputSchema,
 } from "@/lib/ai/prompts/session-summary.v1";
 import {
-  approveTeacherPlan,
+  approveTeacherPlanV2,
   normalizeTeachingText,
-  type ApprovedTeacherPlan,
+  type ApprovedTeacherPlanV2,
 } from "@/lib/class/teacher-plan";
-import { listLevels } from "@/lib/services/level";
+import { selectTeachingCompetency } from "@/lib/class/competency-target";
+import {
+  listCompetencyDefinitions,
+  listLearnerCompetencies,
+  createCompetencyObservation,
+} from "@/lib/services/competency";
 import {
   advanceClassSession,
+  appendClassCompetencyCodes,
   completeClassTurn,
   createProcessingTurn,
   failClassTurn,
   getRecentClassTurns,
+  markClassTurnCompetencyFailed,
+  markClassTurnCompetencySynced,
   type ClassSessionDTO,
   type ClassTurnDTO,
 } from "@/lib/services/class";
 
-/**
- * Shared ML3/ML4 teacher-turn pipeline. Both /api/chat (text) and the realtime
- * gateway (voice) call prepareTeacherTurn (planner + approval) then, after the
- * reply exists, finalizeTeacherTurn (grounded persistence + session advance).
- */
 const RECENT_TURNS = 8;
-const MAX_TAUGHT_CONTEXT = 40;
-const MAX_PENDING = 12;
 const MAX_SUMMARY_CHARS = 3000;
 
 export type InputMode = "text" | "voice";
 
-function flattenGoals(goals: {
-  grammar: string[];
-  vocabulary: string[];
-  functions: string[];
-}): string[] {
-  return [...goals.grammar, ...goals.vocabulary, ...goals.functions];
-}
-
 function compactTurns(turns: Array<{ studentMessage: string; aiMessage?: string }>): string[] {
   return turns.map((turn) => `Student: ${turn.studentMessage}\nTeacher: ${turn.aiMessage ?? ""}`);
-}
-
-function dedupe(values: string[], max: number): string[] {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const value of values) {
-    const key = value.trim().toLowerCase();
-    if (!key || seen.has(key)) continue;
-    seen.add(key);
-    out.push(value.trim());
-    if (out.length >= max) break;
-  }
-  return out;
-}
-
-async function loadGoals(level: string): Promise<string[]> {
-  const levels = await listLevels();
-  const levelContent = levels.find((entry) => entry.code === level);
-  return levelContent ? flattenGoals(levelContent.goals) : [];
 }
 
 export interface PrepareTeacherTurnInput {
@@ -83,12 +57,12 @@ export interface PrepareTeacherTurnInput {
 export interface PreparedTeacherTurn {
   turn: ClassTurnDTO;
   alreadyCompleted: boolean;
-  approvedPlan?: ApprovedTeacherPlan;
+  approvedPlan?: ApprovedTeacherPlanV2;
   plannerLogId?: string;
   recentTurns: string[];
 }
 
-/** Create/reuse the processing turn, run the planner, approve deterministically. */
+/** Create/reuse the processing turn, select the competency target, run planner v2. */
 export async function prepareTeacherTurn(
   input: PrepareTeacherTurnInput,
 ): Promise<PreparedTeacherTurn> {
@@ -100,58 +74,108 @@ export async function prepareTeacherTurn(
     submissionKey: input.submissionKey,
     inputMode: input.inputMode,
   });
-  if (turn.status === "completed") {
-    return { turn, alreadyCompleted: true, recentTurns: [] };
-  }
+  if (turn.status === "completed") return { turn, alreadyCompleted: true, recentTurns: [] };
 
-  const goals = await loadGoals(input.session.level);
+  const definitions = await listCompetencyDefinitions({ isActive: true });
+  const states = await listLearnerCompetencies(input.userId);
   const recent = await getRecentClassTurns(input.session.id, RECENT_TURNS);
   const recentTurns = compactTurns(recent);
+  const defByCode = new Map(definitions.map((d) => [d.code, d]));
+
+  const target = selectTeachingCompetency({
+    sessionLevel: input.session.level,
+    subject: input.session.subject ?? "",
+    sessionTargetedGoals: input.session.targetedGoals,
+    activeDefinitions: definitions.map((d) => ({
+      code: d.code,
+      domain: d.domain,
+      level: d.level,
+      name: d.name,
+      performanceDescriptor: d.performanceDescriptor,
+      prerequisites: d.prerequisites,
+      isCritical: d.isCritical,
+      evidenceRequired: d.evidenceRequired,
+      contextsRequired: d.contextsRequired,
+      isActive: d.isActive,
+    })),
+    learnerStates: states.map((s) => ({
+      competencyCode: s.competencyCode,
+      status: s.status,
+      evidenceCount: s.evidenceCount,
+      distinctContextCount: s.distinctContextCount,
+      negativeEvidenceCount: s.negativeEvidenceCount,
+      weightedAccuracy: s.weightedAccuracy,
+      confidence: s.confidence,
+    })),
+    recentObservations: [],
+    recentTurns: recent.map((t) => ({
+      targetCompetencyCode: t.targetCompetencyCode,
+      contextKey: t.competencyContextKey,
+    })),
+  });
+
+  const selectedCode = target?.targetCompetencyCode ?? "";
+  const relatedCodes = target?.relatedCompetencyCodes ?? [];
+  const allowedCodes = target ? [selectedCode, ...relatedCodes] : [];
+  const contextKey = target?.contextKey ?? "general";
+  const targetDef = selectedCode ? defByCode.get(selectedCode) : undefined;
+  const snapshot = target?.competencySnapshot;
 
   const plannerResult = await getAIProvider().chatJSON(
     {
       model: env.aiClassPlannerModel,
-      messages: buildPlannerMessages({
+      messages: buildPlannerV2Messages({
         level: input.session.level,
         subject: input.session.subject ?? "",
-        curriculumGoals: goals,
-        targetedGoals: input.session.targetedGoals,
-        pendingTargets: input.session.pendingElicitedTargets.slice(0, MAX_PENDING),
-        taughtItems: input.session.taughtItems
-          .slice(0, MAX_TAUGHT_CONTEXT)
-          .map((item) => `${item.type}: ${item.item}`),
+        studentMessage: input.studentMessage,
         recentTurns,
         runningSummary: input.session.runningSummary.slice(0, MAX_SUMMARY_CHARS),
-        studentMessage: input.studentMessage,
+        selectedTarget: {
+          competencyCode: selectedCode,
+          name: targetDef?.name ?? input.session.subject ?? "conversation",
+          domain: targetDef?.domain ?? "communication",
+          level: targetDef?.level ?? input.session.level,
+          performanceDescriptor:
+            targetDef?.performanceDescriptor ?? "hold a natural conversation on the subject",
+          evidenceIntent: target?.evidenceIntent ?? "discover",
+          contextKey,
+          status: snapshot?.status ?? "not-demonstrated",
+          evidenceCount: snapshot?.evidenceCount ?? 0,
+          evidenceRequired: snapshot?.evidenceRequired ?? 5,
+          distinctContextCount: snapshot?.distinctContextCount ?? 0,
+          contextsRequired: snapshot?.contextsRequired ?? 2,
+          weightedAccuracy: snapshot?.weightedAccuracy ?? 0,
+          confidence: snapshot?.confidence ?? 0,
+        },
+        relatedCompetencies: relatedCodes,
       }),
-      prompt: plannerPromptIdentity,
+      prompt: plannerV2PromptIdentity,
       context: { userId: input.userId, sessionId: input.session.id, turnId: turn.id },
     },
-    teacherPlannerOutputSchema,
+    teacherPlannerV2OutputSchema,
   );
 
-  const approvedPlan = approveTeacherPlan({
+  const approvedPlan = approveTeacherPlanV2({
     rawPlan: plannerResult.data,
     studentMessage: input.studentMessage,
-    curriculumGoals: goals,
-    targetedGoals: input.session.targetedGoals,
-    pendingTargets: input.session.pendingElicitedTargets,
+    selectedTargetCode: selectedCode,
+    contextKey,
+    allowedCompetencyCodes: allowedCodes,
+    competencyDomainsByCode: Object.fromEntries(definitions.map((d) => [d.code, d.domain])),
+    maximumIndependence: target?.maximumIndependence ?? "prompted",
+    pronunciationEligible: false,
+    listeningEligible: false,
   });
 
-  return {
-    turn,
-    alreadyCompleted: false,
-    approvedPlan,
-    plannerLogId: plannerResult.logId,
-    recentTurns,
-  };
+  return { turn, alreadyCompleted: false, approvedPlan, plannerLogId: plannerResult.logId, recentTurns };
 }
 
 export interface FinalizeTeacherTurnInput {
   session: ClassSessionDTO;
   userId: string;
+  turnId: string;
   submissionKey: string;
-  approvedPlan: ApprovedTeacherPlan;
+  approvedPlan: ApprovedTeacherPlanV2;
   studentMessage: string;
   finalReply: string;
   plannerLogId?: string;
@@ -161,70 +185,115 @@ export interface FinalizeTeacherTurnInput {
   realtimeResponseId?: string;
 }
 
-/** Persist only what the reply delivered, then advance the session exactly once. */
+/** Persist delivered corrections/teaching, sync competency observations, advance. */
 export async function finalizeTeacherTurn(input: FinalizeTeacherTurnInput): Promise<void> {
+  const plan = input.approvedPlan;
   const normalizedReply = normalizeTeachingText(input.finalReply);
   const normalizedStudent = normalizeTeachingText(input.studentMessage);
 
   const corrections =
-    input.approvedPlan.responsePlan.correctionApproach === "none"
+    plan.responsePlan.correctionApproach === "none"
       ? []
-      : input.approvedPlan.corrections.filter(
-          (correction) =>
-            normalizedStudent.includes(normalizeTeachingText(correction.original)) &&
-            normalizedReply.includes(normalizeTeachingText(correction.corrected)),
+      : plan.corrections.filter(
+          (c) =>
+            normalizedStudent.includes(normalizeTeachingText(c.original)) &&
+            normalizedReply.includes(normalizeTeachingText(c.corrected)),
         );
 
-  const taughtInThisTurn = input.approvedPlan.taught
-    .filter((item) => normalizedReply.includes(normalizeTeachingText(item.teacherLine)))
+  const taughtInThisTurn = plan.taught
+    .filter((t) => normalizedReply.includes(normalizeTeachingText(t.teacherLine)))
     .slice(0, 1)
-    .map((item) => ({ type: item.type, item: item.item, evidence: item.teacherLine }));
+    .map((t) => ({ type: t.type, item: t.item, evidence: t.teacherLine }));
+
+  const candidates = plan.observationCandidates;
+  const targetCode = plan.decision.targetCompetencyCode || undefined;
 
   await completeClassTurn({
     sessionId: input.session.id,
     submissionKey: input.submissionKey,
     aiMessage: input.finalReply,
     corrections,
-    elicitedTargets: input.approvedPlan.elicited,
+    elicitedTargets: plan.nextCompetencyCodes,
     taughtInThisTurn,
-    resolvedTargets: input.approvedPlan.resolvedTargets,
-    teacherDecision: input.approvedPlan.decision,
-    responsePlan: input.approvedPlan.responsePlan,
+    teacherDecision: {
+      move: plan.decision.move,
+      reason: plan.decision.reason,
+      turnObjective: plan.decision.turnObjective,
+      languageMode: plan.decision.languageMode,
+      targetCompetencyCode: targetCode,
+      evidenceIntent: plan.decision.evidenceIntent,
+      contextKey: plan.decision.contextKey,
+    },
+    responsePlan: plan.responsePlan,
     plannerAiCallId: input.plannerLogId,
     replyAiCallId: input.replyLogId,
     aiCallId: input.replyLogId,
     inputMode: input.inputMode,
     transcription: input.transcription,
     realtimeResponseId: input.realtimeResponseId,
+    targetCompetencyCode: targetCode,
+    relatedCompetencyCodes: [],
+    evidenceIntent: plan.decision.evidenceIntent,
+    competencyContextKey: plan.decision.contextKey,
+    competencyCandidates: candidates,
+    competencySyncStatus: candidates.length ? "pending" : "not-required",
   });
 
-  const remaining = input.session.pendingElicitedTargets.filter(
-    (pendingTarget) =>
-      !input.approvedPlan.resolvedTargets.some(
-        (resolved) => normalizeTeachingText(resolved) === normalizeTeachingText(pendingTarget),
-      ),
-  );
-  const pending = dedupe(
-    [...remaining, ...input.approvedPlan.elicited, ...input.approvedPlan.nextTargets],
-    MAX_PENDING,
-  );
+  // Competency observations come only from the student message. Best-effort:
+  // failure keeps the delivered reply and flags the turn for a later retry.
+  if (candidates.length) {
+    try {
+      const ids: string[] = [];
+      for (const candidate of candidates) {
+        const { observation } = await createCompetencyObservation({
+          observationKey: `class:${input.turnId}:${candidate.competencyCode}`,
+          userId: input.userId,
+          competencyCode: candidate.competencyCode,
+          sourceType: "class",
+          sourceSessionId: input.session.id,
+          sourceTurnId: input.turnId,
+          contextKey: plan.decision.contextKey || "class",
+          result: candidate.result,
+          accuracy: candidate.accuracy,
+          confidence: candidate.confidence,
+          independence: candidate.independence,
+          evidenceExcerpt: candidate.evidenceExcerpt,
+          aiCallId: input.plannerLogId,
+        });
+        ids.push(observation.id);
+      }
+      await markClassTurnCompetencySynced({
+        sessionId: input.session.id,
+        submissionKey: input.submissionKey,
+        observationIds: ids,
+      });
+    } catch {
+      await markClassTurnCompetencyFailed({
+        sessionId: input.session.id,
+        submissionKey: input.submissionKey,
+      });
+    }
+  }
+
   const advanced = await advanceClassSession({
     sessionId: input.session.id,
     userId: input.userId,
-    pendingElicitedTargets: pending,
+    pendingElicitedTargets: plan.nextCompetencyCodes,
   });
+  if (targetCode) {
+    await appendClassCompetencyCodes({ sessionId: input.session.id, userId: input.userId, code: targetCode });
+  }
 
   if (advanced && advanced.turnCount > 0 && advanced.turnCount % 6 === 0) {
     try {
       const summaryTurns = await getRecentClassTurns(input.session.id, RECENT_TURNS);
-      const goals = await loadGoals(input.session.level);
       const summary = await getAIProvider().chatJSON(
         {
           model: env.aiGenerationModel,
           messages: buildSummaryMessages({
             level: input.session.level,
             subject: input.session.subject ?? "",
-            goals,
+            goals: input.session.targetedGoals,
             recentTurns: compactTurns(summaryTurns),
             runningSummary: advanced.runningSummary,
           }),
@@ -236,11 +305,11 @@ export async function finalizeTeacherTurn(input: FinalizeTeacherTurnInput): Prom
       await advanceClassSession({
         sessionId: input.session.id,
         userId: input.userId,
-        pendingElicitedTargets: pending,
+        pendingElicitedTargets: plan.nextCompetencyCodes,
         runningSummary: summary.data.summary.slice(0, MAX_SUMMARY_CHARS),
       });
     } catch {
-      // Keep the old running summary; the turn already succeeded.
+      // Keep the old running summary.
     }
   }
 }

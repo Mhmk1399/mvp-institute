@@ -5,7 +5,7 @@ import { classMessageSchema } from "@/lib/schemas/class";
 import {
   promptIdentity as replyPromptIdentity,
   buildMessages as buildReplyMessages,
-} from "@/lib/ai/prompts/class-reply.v1";
+} from "@/lib/ai/prompts/class-reply.v2";
 import {
   prepareTeacherTurn,
   finalizeTeacherTurn,
@@ -147,6 +147,7 @@ export async function POST(request: Request): Promise<Response> {
   await finalizeTeacherTurn({
     session,
     userId: user.id,
+    turnId: prepared.turn.id,
     submissionKey,
     approvedPlan: prepared.approvedPlan,
     studentMessage: message,

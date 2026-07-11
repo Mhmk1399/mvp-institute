@@ -9,6 +9,7 @@
     "lint": "eslint",
     "ai:smoke": "tsx scripts/smoke-ai.ts",
     "seed:levels": "tsx scripts/seed-levels.ts",
+    "seed:competencies": "tsx scripts/seed-competencies.ts",
     "realtime:gateway": "NODE_OPTIONS=--conditions=react-server tsx realtime/server.ts",
     "realtime:dev": "NODE_OPTIONS=--conditions=react-server tsx watch realtime/server.ts"
   },

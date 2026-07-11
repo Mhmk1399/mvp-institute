@@ -1,4 +1,10 @@
 import type { TeacherPlannerOutput } from "@/lib/ai/prompts/teacher-planner.v1";
+import type { TeacherPlannerV2Output } from "@/lib/ai/prompts/teacher-planner.v2";
+import {
+  approveObservationCandidates,
+  type ObservationCandidate,
+} from "@/lib/competency/observation";
+import type { CompetencyIndependence } from "@/lib/schemas/competency";
 
 /**
  * Deterministic approval of a raw teacher plan. Pure TypeScript: no MongoDB,
@@ -105,5 +111,108 @@ export function approveTeacherPlan(input: ApproveTeacherPlanInput): ApprovedTeac
     elicited: dedupe(rawPlan.elicited, 3),
     resolvedTargets: keepAllowed(rawPlan.resolvedTargets, 3),
     nextTargets: keepAllowed(rawPlan.nextTargets, 3),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ML7 v2 approval (competency-aware). Legacy v1 exports above are unchanged.
+// ---------------------------------------------------------------------------
+
+export interface ApprovedTeacherPlanV2 {
+  decision: {
+    move: string;
+    reason: string;
+    targetCompetencyCode: string;
+    evidenceIntent: string;
+    contextKey: string;
+    turnObjective: string;
+    languageMode: "english" | "english-with-brief-persian-support";
+  };
+  responsePlan: {
+    acknowledgement?: string;
+    correctionApproach: "none" | "recast" | "explicit";
+    teachingPoint?: string;
+    followUpQuestion?: string;
+    maximumReplySentences: number;
+  };
+  corrections: Array<{ original: string; corrected: string; explanation: string }>;
+  taught: Array<{ type: "vocabulary" | "grammar" | "function"; item: string; teacherLine: string }>;
+  observationCandidates: ObservationCandidate[];
+  nextCompetencyCodes: string[];
+}
+
+export interface ApproveTeacherPlanV2Input {
+  rawPlan: TeacherPlannerV2Output;
+  studentMessage: string;
+  selectedTargetCode: string;
+  contextKey: string;
+  allowedCompetencyCodes: string[];
+  competencyDomainsByCode: Record<string, string>;
+  maximumIndependence: CompetencyIndependence;
+  pronunciationEligible: boolean;
+  listeningEligible: boolean;
+}
+
+export function approveTeacherPlanV2(input: ApproveTeacherPlanV2Input): ApprovedTeacherPlanV2 {
+  const { rawPlan } = input;
+  const normalizedStudent = normalizeTeachingText(input.studentMessage);
+  const allowed = new Set(input.allowedCompetencyCodes.map((code) => code.toUpperCase()));
+
+  let languageMode = rawPlan.decision.languageMode;
+  if (languageMode === "english-with-brief-persian-support" && !containsPersian(input.studentMessage)) {
+    languageMode = "english";
+  }
+
+  let followUpQuestion = rawPlan.responsePlan.followUpQuestion?.trim();
+  if (followUpQuestion) {
+    const mark = followUpQuestion.indexOf("?");
+    if (mark >= 0) followUpQuestion = followUpQuestion.slice(0, mark + 1).trim();
+    followUpQuestion = followUpQuestion || undefined;
+  }
+
+  const corrections = rawPlan.corrections
+    .filter((correction) => {
+      const original = normalizeTeachingText(correction.original);
+      return original.length > 0 && normalizedStudent.includes(original);
+    })
+    .slice(0, 3);
+
+  const observationCandidates = approveObservationCandidates({
+    candidates: rawPlan.observationCandidates,
+    studentMessage: input.studentMessage,
+    allowedCompetencyCodes: input.allowedCompetencyCodes,
+    maximumIndependence: input.maximumIndependence,
+    pronunciationEligible: input.pronunciationEligible,
+    listeningEligible: input.listeningEligible,
+    competencyDomainsByCode: input.competencyDomainsByCode,
+  });
+
+  const nextCompetencyCodes = dedupe(
+    rawPlan.nextCompetencyCodes.map((code) => code.toUpperCase()).filter((code) => allowed.has(code)),
+    3,
+  );
+
+  return {
+    decision: {
+      move: rawPlan.decision.move,
+      reason: rawPlan.decision.reason,
+      // Planner can never change the server-selected target.
+      targetCompetencyCode: input.selectedTargetCode.toUpperCase(),
+      evidenceIntent: rawPlan.decision.evidenceIntent,
+      contextKey: input.contextKey,
+      turnObjective: rawPlan.decision.turnObjective,
+      languageMode,
+    },
+    responsePlan: {
+      acknowledgement: rawPlan.responsePlan.acknowledgement,
+      correctionApproach: rawPlan.responsePlan.correctionApproach,
+      teachingPoint: rawPlan.responsePlan.teachingPoint,
+      followUpQuestion,
+      maximumReplySentences: Math.min(5, Math.max(2, Math.round(rawPlan.responsePlan.maximumReplySentences))),
+    },
+    corrections,
+    taught: rawPlan.taught.slice(0, 1),
+    observationCandidates,
+    nextCompetencyCodes,
   };
 }

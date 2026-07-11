@@ -62,6 +62,43 @@ const examTurnSchema = new Schema(
     questionAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
     scoreAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
 
+    // ML6 competency-aware fields (optional, backward-compatible).
+    targetCompetencyCode: { type: String },
+    relatedCompetencyCodes: { type: [String], default: [] },
+    evidenceIntent: {
+      type: String,
+      enum: ["discover", "positive-evidence", "negative-evidence", "context-diversity", "independent-use", "boundary-probe"],
+    },
+    contextKey: { type: String },
+    taskType: {
+      type: String,
+      enum: ["open-response", "roleplay", "reformulation", "explanation", "audio-comprehension", "register-shift"],
+    },
+    pronunciationEligible: { type: Boolean, default: false },
+    listeningEligible: { type: Boolean, default: false },
+    competencyCandidates: {
+      type: [
+        new Schema(
+          {
+            competencyCode: { type: String, required: true },
+            result: { type: String, required: true },
+            accuracy: { type: Number, required: true },
+            confidence: { type: Number, required: true },
+            independence: { type: String, required: true },
+            evidenceExcerpt: { type: String, required: true },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    competencyObservationIds: { type: [Schema.Types.ObjectId], default: [] },
+    competencySyncStatus: {
+      type: String,
+      enum: ["not-required", "pending", "completed", "failed"],
+      default: "not-required",
+    },
+
     submissionKey: { type: String },
   },
   { timestamps: true },

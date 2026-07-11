@@ -61,6 +61,8 @@ const classSessionSchema = new Schema(
     targetedGoals: { type: [String], default: [] },
     taughtItems: { type: [taughtItemSchema], default: [] },
     pendingElicitedTargets: { type: [String], default: [] },
+    practisedCompetencyCodes: { type: [String], default: [] },
+    recentCompetencyCodes: { type: [String], default: [] },
     runningSummary: { type: String, default: "" },
     finalSummary: { type: finalSummarySchema },
     turnCount: { type: Number, default: 0, required: true },

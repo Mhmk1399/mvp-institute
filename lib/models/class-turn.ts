@@ -31,6 +31,21 @@ const teacherDecisionSchema = new Schema(
     targetGoal: { type: String },
     turnObjective: { type: String, required: true },
     languageMode: { type: String, required: true },
+    targetCompetencyCode: { type: String },
+    evidenceIntent: { type: String },
+    contextKey: { type: String },
+  },
+  { _id: false },
+);
+
+const competencyCandidateSchema = new Schema(
+  {
+    competencyCode: { type: String, required: true },
+    result: { type: String, required: true },
+    accuracy: { type: Number, required: true },
+    confidence: { type: Number, required: true },
+    independence: { type: String, required: true },
+    evidenceExcerpt: { type: String, required: true },
   },
   { _id: false },
 );
@@ -82,6 +97,19 @@ const classTurnSchema = new Schema(
       completedAt: { type: Date },
     },
     realtimeResponseId: { type: String },
+
+    // ML7 competency-aware fields (optional, backward-compatible).
+    targetCompetencyCode: { type: String },
+    relatedCompetencyCodes: { type: [String], default: [] },
+    evidenceIntent: { type: String },
+    competencyContextKey: { type: String },
+    competencyCandidates: { type: [competencyCandidateSchema], default: [] },
+    competencyObservationIds: { type: [Schema.Types.ObjectId], default: [] },
+    competencySyncStatus: {
+      type: String,
+      enum: ["not-required", "pending", "completed", "failed"],
+      default: "not-required",
+    },
 
     submissionKey: { type: String, required: true },
 
