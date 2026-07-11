@@ -45,6 +45,8 @@ const schema = z.object({
   // Model ids come only from config — never hardcode a dated model name.
   AI_GENERATION_MODEL: requiredSecret("AI_GENERATION_MODEL is required"),
   AI_SCORING_MODEL: requiredSecret("AI_SCORING_MODEL is required"),
+  // Optional dedicated planner model; falls back to AI_GENERATION_MODEL.
+  AI_CLASS_PLANNER_MODEL: z.string().optional(),
   AI_TRANSCRIPTION_MODEL: z.string().min(1).default("gpt-realtime-whisper"),
   AI_TRANSCRIPTION_DELAY: z.enum(["minimal", "low", "medium"]).default("minimal"),
   REALTIME_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
@@ -79,6 +81,8 @@ export const env = {
   aiProvider: data.AI_PROVIDER,
   aiGenerationModel: data.AI_GENERATION_MODEL,
   aiScoringModel: data.AI_SCORING_MODEL,
+  // Planner model falls back to the generation model when unset.
+  aiClassPlannerModel: data.AI_CLASS_PLANNER_MODEL || data.AI_GENERATION_MODEL,
   aiTranscriptionModel: data.AI_TRANSCRIPTION_MODEL,
   aiTranscriptionDelay: data.AI_TRANSCRIPTION_DELAY,
   realtimePort: data.REALTIME_PORT,

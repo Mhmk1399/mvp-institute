@@ -24,6 +24,7 @@ export function ClassChat({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string>();
   const bottomRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const submittingRef = useRef(false);
 
   useEffect(() => {
@@ -114,6 +115,15 @@ export function ClassChat({
     }
   }
 
+  // Voice transcript lands in the composer; the student reviews then sends it.
+  function receiveVoiceTranscript(transcript: string): void {
+    const text = transcript.trim();
+    if (!text) return;
+    setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+    setError(undefined);
+    textareaRef.current?.focus();
+  }
+
   return (
     <div className="flex min-h-[52dvh] flex-col gap-4">
       <p className="text-right text-xs text-[#91A4B7]" role="status">
@@ -134,10 +144,11 @@ export function ClassChat({
         </p>
       ) : null}
 
-      <PushToTalk sessionId={sessionId} disabled={sending} onTranscript={submitMessage} />
+      <PushToTalk sessionId={sessionId} disabled={sending} onTranscript={receiveVoiceTranscript} />
 
       <div className="flex items-end gap-2">
         <textarea
+          ref={textareaRef}
           value={input}
           disabled={sending}
           rows={2}

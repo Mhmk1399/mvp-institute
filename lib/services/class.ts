@@ -70,6 +70,23 @@ export interface ClassTurnDTO {
   corrections: CorrectionDTO[];
   elicitedTargets: string[];
   taughtInThisTurn: LearnedItemDTO[];
+  resolvedTargets: string[];
+  teacherDecision?: {
+    move: string;
+    reason: string;
+    targetGoal?: string;
+    turnObjective: string;
+    languageMode: string;
+  };
+  responsePlan?: {
+    acknowledgement?: string;
+    correctionApproach: string;
+    teachingPoint?: string;
+    followUpQuestion?: string;
+    maximumReplySentences: number;
+  };
+  plannerAiCallId?: string;
+  replyAiCallId?: string;
   submissionKey: string;
   errorCode?: string;
   createdAt: string;
@@ -162,6 +179,27 @@ function toTurnDTO(doc: TurnLean): ClassTurnDTO {
       item: item.item,
       evidence: item.evidence,
     })),
+    resolvedTargets: [...(doc.resolvedTargets ?? [])],
+    teacherDecision: doc.teacherDecision
+      ? {
+          move: doc.teacherDecision.move,
+          reason: doc.teacherDecision.reason,
+          targetGoal: doc.teacherDecision.targetGoal ?? undefined,
+          turnObjective: doc.teacherDecision.turnObjective,
+          languageMode: doc.teacherDecision.languageMode,
+        }
+      : undefined,
+    responsePlan: doc.responsePlan
+      ? {
+          acknowledgement: doc.responsePlan.acknowledgement ?? undefined,
+          correctionApproach: doc.responsePlan.correctionApproach,
+          teachingPoint: doc.responsePlan.teachingPoint ?? undefined,
+          followUpQuestion: doc.responsePlan.followUpQuestion ?? undefined,
+          maximumReplySentences: doc.responsePlan.maximumReplySentences,
+        }
+      : undefined,
+    plannerAiCallId: doc.plannerAiCallId ? String(doc.plannerAiCallId) : undefined,
+    replyAiCallId: doc.replyAiCallId ? String(doc.replyAiCallId) : undefined,
     submissionKey: doc.submissionKey,
     errorCode: doc.errorCode ?? undefined,
     createdAt: doc.createdAt.toISOString(),
@@ -351,6 +389,11 @@ export async function completeClassTurn(input: {
   corrections: CorrectionDTO[];
   elicitedTargets: string[];
   taughtInThisTurn: LearnedItemDTO[];
+  resolvedTargets?: string[];
+  teacherDecision?: ClassTurnDTO["teacherDecision"];
+  responsePlan?: ClassTurnDTO["responsePlan"];
+  plannerAiCallId?: string;
+  replyAiCallId?: string;
   aiCallId?: string;
 }): Promise<ClassTurnDTO | null> {
   await connectToDatabase();
@@ -363,6 +406,11 @@ export async function completeClassTurn(input: {
         corrections: input.corrections,
         elicitedTargets: input.elicitedTargets,
         taughtInThisTurn: input.taughtInThisTurn,
+        resolvedTargets: input.resolvedTargets ?? [],
+        teacherDecision: input.teacherDecision,
+        responsePlan: input.responsePlan,
+        plannerAiCallId: input.plannerAiCallId,
+        replyAiCallId: input.replyAiCallId,
         aiCallId: input.aiCallId,
       },
     },

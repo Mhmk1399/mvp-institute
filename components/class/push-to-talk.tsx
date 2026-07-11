@@ -8,8 +8,6 @@ import {
   type TranscriptionStatus,
 } from "@/lib/client/realtime-transcription";
 
-type SendState = "idle" | "sending" | "failed";
-
 export function PushToTalk({
   sessionId,
   disabled,
@@ -17,17 +15,16 @@ export function PushToTalk({
 }: {
   sessionId: string;
   disabled: boolean;
-  onTranscript(transcript: string): Promise<void>;
+  onTranscript(transcript: string): void;
 }) {
   const realtime = useClassRealtime();
   const clientRef = useRef<RealtimeTranscriptionClient | null>(null);
   const mountedRef = useRef(true);
   const actionPendingRef = useRef(false);
   const onTranscriptRef = useRef(onTranscript);
+  const statusRef = useRef<TranscriptionStatus>("idle");
   const [status, setStatus] = useState<TranscriptionStatus>("idle");
   const [partial, setPartial] = useState("");
-  const [finalTranscript, setFinalTranscript] = useState("");
-  const [sendState, setSendState] = useState<SendState>("idle");
   const [safeError, setSafeError] = useState<string>();
 
   useEffect(() => {
@@ -43,33 +40,39 @@ export function PushToTalk({
     };
   }, [sessionId]);
 
-  async function submitTranscript(transcript: string): Promise<void> {
-    setSendState("sending");
-    setSafeError(undefined);
-    realtime.voiceTranscriptCompleted();
+  function notifyLifecycle(notify: () => void): void {
     try {
-      await onTranscriptRef.current(transcript);
-      if (!mountedRef.current) return;
-      setSendState("idle");
-      realtime.voiceTurnCompleted();
+      notify();
     } catch {
-      if (!mountedRef.current) return;
-      setSendState("failed");
-      setSafeError("Voice message could not be sent.");
-      realtime.voiceTurnFailed();
+      setSafeError("Voice connection was interrupted.");
     }
+  }
+
+  function hasStatus(expected: TranscriptionStatus): boolean {
+    return statusRef.current === expected;
+  }
+
+  // Hand the finished transcript to the composer; the student reviews and sends
+  // it manually. Settle the orb back to idle so the Send button re-enables.
+  function deliverTranscript(transcript: string): void {
+    const text = transcript.trim();
+    setPartial("");
+    if (text) onTranscriptRef.current(text);
+    notifyLifecycle(realtime.voiceTurnCompleted);
   }
 
   function getClient(): RealtimeTranscriptionClient {
     if (clientRef.current) return clientRef.current;
     const client = new RealtimeTranscriptionClient({
       sessionId,
-      onStatus: setStatus,
+      onStatus: (nextStatus) => {
+        statusRef.current = nextStatus;
+        setStatus(nextStatus);
+      },
       onPartial: setPartial,
       onFinal: ({ transcript }) => {
         if (!mountedRef.current) return;
-        setFinalTranscript(transcript);
-        void submitTranscript(transcript);
+        deliverTranscript(transcript);
       },
       onError: (message) => setSafeError(message),
     });
@@ -80,17 +83,27 @@ export function PushToTalk({
   async function startCapture(): Promise<void> {
     if (disabled || !realtime.classReady || realtime.status !== "ready" || actionPendingRef.current) return;
     actionPendingRef.current = true;
-    setFinalTranscript("");
-    setSendState("idle");
     setSafeError(undefined);
     try {
       const client = getClient();
       await client.connect();
       if (!mountedRef.current) return;
+      if (!hasStatus("ready")) {
+        setSafeError("Voice connection is not ready yet.");
+        return;
+      }
       client.start();
-      realtime.voiceCaptureStarted();
+      if (!hasStatus("listening")) {
+        setSafeError("Microphone could not be started.");
+        return;
+      }
+      notifyLifecycle(realtime.voiceCaptureStarted);
     } catch {
-      // The client reports a safe, user-facing status and message.
+      setSafeError(
+        statusRef.current === "permission-denied"
+          ? "Microphone permission was denied."
+          : "Voice connection could not be started.",
+      );
     } finally {
       actionPendingRef.current = false;
     }
@@ -98,48 +111,45 @@ export function PushToTalk({
 
   function stopCapture(): void {
     clientRef.current?.stop();
-    realtime.voiceCaptureStopped();
+    notifyLifecycle(realtime.voiceCaptureStopped);
   }
 
   function cancelCapture(): void {
     clientRef.current?.cancel();
     setPartial("");
-    setFinalTranscript("");
-    setSendState("idle");
     setSafeError(undefined);
-    realtime.voiceCaptureCancelled();
+    notifyLifecycle(realtime.voiceCaptureCancelled);
   }
 
   const socketReady = realtime.status === "ready" && realtime.classReady;
   const listening = status === "listening";
   const finalizing = status === "finalizing";
   const canCancel = listening || finalizing;
-  const primaryLabel = sendState === "sending"
-    ? "Sending…"
-    : sendState === "failed"
-      ? "Try again"
-      : status === "connecting"
-        ? "Connecting…"
-        : listening
-          ? "Stop"
-          : finalizing
-            ? "Transcribing…"
-            : status === "permission-denied"
-              ? "Microphone denied"
-              : status === "unsupported" || status === "error"
-                ? "Voice unavailable"
-                : "Enable microphone";
+  const primaryLabel = !socketReady
+    ? "Connecting voice…"
+    : status === "connecting"
+      ? "Connecting…"
+      : listening
+        ? "Stop"
+        : finalizing
+          ? "Transcribing…"
+          : status === "permission-denied"
+            ? "Microphone denied"
+            : status === "unsupported" || status === "error"
+              ? "Voice unavailable"
+              : "Speak";
 
-  const primaryDisabled = (disabled && !listening) || !socketReady || sendState === "sending" || status === "connecting" || finalizing || status === "permission-denied" || status === "unsupported";
+  const primaryDisabled =
+    (disabled && !listening) ||
+    !socketReady ||
+    status === "connecting" ||
+    finalizing ||
+    status === "permission-denied" ||
+    status === "unsupported";
 
   function handlePrimary(): void {
-    if (listening) {
-      stopCapture();
-    } else if (sendState === "failed" && finalTranscript) {
-      void submitTranscript(finalTranscript);
-    } else {
-      void startCapture();
-    }
+    if (listening) stopCapture();
+    else void startCapture();
   }
 
   return (
@@ -164,15 +174,15 @@ export function PushToTalk({
           </button>
         ) : null}
         <span className="text-xs text-[#91A4B7]" role="status">
-          {listening ? "Listening…" : finalizing ? "Transcribing…" : sendState === "sending" ? "Sending…" : ""}
+          {listening ? "Listening…" : finalizing ? "Transcribing…" : ""}
         </span>
       </div>
       {partial ? (
         <p className="mt-3 text-sm text-[#DDF7FF]" aria-live="polite">{partial}</p>
-      ) : finalTranscript ? (
-        <p className="mt-3 text-sm text-[#DDF7FF]" aria-live="polite">{finalTranscript}</p>
       ) : null}
-      {safeError ? <p className="mt-2 text-xs text-red-300">{safeError}</p> : null}
+      {safeError || (!socketReady && realtime.lastError) ? (
+        <p className="mt-2 text-xs text-red-300">{safeError ?? realtime.lastError}</p>
+      ) : null}
     </div>
   );
 }

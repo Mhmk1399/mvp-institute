@@ -24,6 +24,28 @@ const taughtSchema = new Schema(
   { _id: false },
 );
 
+const teacherDecisionSchema = new Schema(
+  {
+    move: { type: String, required: true },
+    reason: { type: String, required: true },
+    targetGoal: { type: String },
+    turnObjective: { type: String, required: true },
+    languageMode: { type: String, required: true },
+  },
+  { _id: false },
+);
+
+const responsePlanSchema = new Schema(
+  {
+    acknowledgement: { type: String },
+    correctionApproach: { type: String, required: true },
+    teachingPoint: { type: String },
+    followUpQuestion: { type: String },
+    maximumReplySentences: { type: Number, required: true },
+  },
+  { _id: false },
+);
+
 const classTurnSchema = new Schema(
   {
     sessionId: { type: Schema.Types.ObjectId, ref: "ClassSession", required: true },
@@ -43,8 +65,14 @@ const classTurnSchema = new Schema(
     corrections: { type: [correctionSchema], default: [] },
     elicitedTargets: { type: [String], default: [] },
     taughtInThisTurn: { type: [taughtSchema], default: [] },
+    resolvedTargets: { type: [String], default: [] },
+
+    teacherDecision: { type: teacherDecisionSchema },
+    responsePlan: { type: responsePlanSchema },
 
     aiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
+    plannerAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
+    replyAiCallId: { type: Schema.Types.ObjectId, ref: "AICallLog" },
 
     submissionKey: { type: String, required: true },
 

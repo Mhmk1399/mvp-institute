@@ -3,12 +3,17 @@ import { env } from "@/lib/env";
 import { getAIProvider } from "@/lib/ai/client";
 import { classMessageSchema } from "@/lib/schemas/class";
 import {
-  promptIdentity as classTurnPromptIdentity,
-  buildMessages as buildClassTurnMessages,
-  classTurnOutputSchema,
-  type ClassTurnOutput,
-} from "@/lib/ai/prompts/class-turn.v1";
-import type { AIJSONResult } from "@/lib/ai/types";
+  promptIdentity as plannerPromptIdentity,
+  buildMessages as buildPlannerMessages,
+  teacherPlannerOutputSchema,
+  type TeacherPlannerOutput,
+} from "@/lib/ai/prompts/teacher-planner.v1";
+import {
+  promptIdentity as replyPromptIdentity,
+  buildMessages as buildReplyMessages,
+} from "@/lib/ai/prompts/class-reply.v1";
+import { approveTeacherPlan, normalizeTeachingText } from "@/lib/class/teacher-plan";
+import type { AIChatResult, AIJSONResult } from "@/lib/ai/types";
 import {
   promptIdentity as summaryPromptIdentity,
   buildMessages as buildSummaryMessages,
@@ -152,16 +157,18 @@ export async function POST(request: Request): Promise<Response> {
 
   const recent = await getRecentClassTurns(sessionId, RECENT_TURNS);
 
-  let result: AIJSONResult<ClassTurnOutput>;
+  // Call 1: structured Teacher Planner (dedicated planner model, falls back to generation).
+  let plannerResult: AIJSONResult<TeacherPlannerOutput>;
   try {
-    result = await getAIProvider().chatJSON(
+    plannerResult = await getAIProvider().chatJSON(
       {
-        model: env.aiGenerationModel,
-        messages: buildClassTurnMessages({
+        model: env.aiClassPlannerModel,
+        messages: buildPlannerMessages({
           level: session.level,
           subject: session.subject ?? "",
-          goals,
-          pendingElicitedTargets: session.pendingElicitedTargets.slice(0, MAX_PENDING),
+          curriculumGoals: goals,
+          targetedGoals: session.targetedGoals,
+          pendingTargets: session.pendingElicitedTargets.slice(0, MAX_PENDING),
           taughtItems: session.taughtItems
             .slice(0, MAX_TAUGHT_CONTEXT)
             .map((item) => `${item.type}: ${item.item}`),
@@ -169,29 +176,88 @@ export async function POST(request: Request): Promise<Response> {
           runningSummary: session.runningSummary.slice(0, MAX_SUMMARY_CHARS),
           studentMessage: message,
         }),
-        prompt: classTurnPromptIdentity,
+        prompt: plannerPromptIdentity,
         context: { userId: user.id, sessionId, turnId: turn.id },
       },
-      classTurnOutputSchema,
+      teacherPlannerOutputSchema,
     );
   } catch {
-    await failClassTurn({ sessionId, submissionKey, errorCode: "ai_unavailable" });
+    await failClassTurn({ sessionId, submissionKey, errorCode: "planner_unavailable" });
     return json({ error: "The teacher is unavailable. Please retry.", retryable: true }, 502);
   }
 
-  const output = result.data;
+  // Deterministic approval — code validates curriculum, grounding, Persian, clamps.
+  const approvedPlan = approveTeacherPlan({
+    rawPlan: plannerResult.data,
+    studentMessage: message,
+    curriculumGoals: goals,
+    targetedGoals: session.targetedGoals,
+    pendingTargets: session.pendingElicitedTargets,
+  });
+
+  // Call 2: natural teacher reply (plain text, generation model).
+  let replyResult: AIChatResult;
+  try {
+    replyResult = await getAIProvider().chat({
+      model: env.aiGenerationModel,
+      messages: buildReplyMessages({
+        level: session.level,
+        subject: session.subject ?? "",
+        studentMessage: message,
+        recentTurns: compactTurns(recent),
+        approvedPlan,
+      }),
+      prompt: replyPromptIdentity,
+      context: { userId: user.id, sessionId, turnId: turn.id },
+    });
+  } catch {
+    await failClassTurn({ sessionId, submissionKey, errorCode: "reply_unavailable" });
+    return json({ error: "The teacher is unavailable. Please retry.", retryable: true }, 502);
+  }
+
+  const reply = replyResult.text.trim();
+  if (!reply) {
+    await failClassTurn({ sessionId, submissionKey, errorCode: "reply_unavailable" });
+    return json({ error: "The teacher is unavailable. Please retry.", retryable: true }, 502);
+  }
+
+  // Persist only what the reply actually delivered.
+  const normalizedReply = normalizeTeachingText(reply);
+  const corrections =
+    approvedPlan.responsePlan.correctionApproach === "none"
+      ? []
+      : approvedPlan.corrections.filter((correction) =>
+          normalizedReply.includes(normalizeTeachingText(correction.corrected)),
+        );
+  const taughtInThisTurn = approvedPlan.taught
+    .filter((item) => normalizedReply.includes(normalizeTeachingText(item.teacherLine)))
+    .slice(0, 1)
+    .map((item) => ({ type: item.type, item: item.item, evidence: item.teacherLine }));
+
   await completeClassTurn({
     sessionId,
     submissionKey,
-    aiMessage: output.reply,
-    corrections: output.corrections,
-    elicitedTargets: output.elicited,
-    taughtInThisTurn: output.taught,
-    aiCallId: result.logId,
+    aiMessage: reply,
+    corrections,
+    elicitedTargets: approvedPlan.elicited,
+    taughtInThisTurn,
+    resolvedTargets: approvedPlan.resolvedTargets,
+    teacherDecision: approvedPlan.decision,
+    responsePlan: approvedPlan.responsePlan,
+    plannerAiCallId: plannerResult.logId,
+    replyAiCallId: replyResult.logId,
+    aiCallId: replyResult.logId,
   });
 
+  // Deterministic pending-target update.
+  const remainingPending = session.pendingElicitedTargets.filter(
+    (pendingTarget) =>
+      !approvedPlan.resolvedTargets.some(
+        (resolved) => normalizeTeachingText(resolved) === normalizeTeachingText(pendingTarget),
+      ),
+  );
   const pending = dedupe(
-    [...output.elicited, ...session.pendingElicitedTargets],
+    [...remainingPending, ...approvedPlan.elicited, ...approvedPlan.nextTargets],
     MAX_PENDING,
   );
   const advanced = await advanceClassSession({
@@ -230,5 +296,5 @@ export async function POST(request: Request): Promise<Response> {
     }
   }
 
-  return replyStream(turn.id, output.reply);
+  return replyStream(turn.id, reply);
 }
